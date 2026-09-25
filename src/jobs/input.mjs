@@ -110,6 +110,17 @@ export function validateRequest(body) {
     throw httpError(400, "INVALID_CONFIG", "`config` must be an object");
   }
 
+  // These are owned by the Job adapter, not the engine config.
+  for (const reserved of ["bin", "progressCallback", "timeout"]) {
+    if (config && Object.prototype.hasOwnProperty.call(config, reserved)) {
+      throw httpError(
+        400,
+        "INVALID_CONFIG",
+        `config.${reserved} is reserved and cannot be set`
+      );
+    }
+  }
+
   const executionSpec = execution === undefined ? {} : execution;
   if (
     executionSpec === null ||

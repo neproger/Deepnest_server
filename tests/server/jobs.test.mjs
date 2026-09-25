@@ -15,12 +15,14 @@ let server;
 let base;
 let binSvg;
 let partSvg;
+let partHoleSvg;
 
 before(async () => {
   server = await start({ port: 0, host: "127.0.0.1" });
   base = `http://127.0.0.1:${server.address().port}`;
   binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
   partSvg = await readFile(path.resolve(fixtures, "part.svg"), "utf8");
+  partHoleSvg = await readFile(path.resolve(fixtures, "part-hole.svg"), "utf8");
 });
 
 after(async () => {
@@ -229,6 +231,10 @@ test("streams job.started and result.updated over SSE", async () => {
     "missing job.started event"
   );
   assert.ok(
+    events.some((event) => event.type === "engine.progress"),
+    "missing engine.progress event"
+  );
+  assert.ok(
     events.some((event) => event.type === "result.updated"),
     "missing result.updated event"
   );
@@ -356,4 +362,102 @@ test("refuses to delete a running job until it is stopped", async () => {
   await stopJob(id); // idempotent
   await waitFor(async () => (await statusOf(id)) === "stopped");
   assert.equal((await deleteJob(id)).status, 204);
+});
+
+test("passes engine config through (rotations=1 disables rotation)", async () => {
+  const created = (
+    await createJob(
+      jobBody([{ id: "cfg", data: partSvg }], {
+        config: {
+          units: "mm",
+          spacing: 0,
+          timeRatio: 0,
+          rotations: 1,
+          placementType: "box",
+          populationSize: 4,
+          mutationRate: 1,
+          curveTolerance: 0.5,
+        },
+      })
+    )
+  ).json;
+  const id = created.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 ? res.json : null;
+  }, { message: "no result for custom config" });
+
+  assert.ok(result.placements.length > 0);
+  assert.ok(
+    result.placements.every((placement) => placement.rotation === 0),
+    "rotations=1 must produce rotation 0 placements"
+  );
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("expands part quantity into distinct instances", async () => {
+  const created = (
+    await createJob(jobBody([{ id: "copy", data: partSvg, quantity: 3 }]))
+  ).json;
+  const id = created.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 && res.json.placements.length === 3
+      ? res.json
+      : null;
+  }, { message: "quantity was not expanded to 3 instances" });
+
+  assert.deepEqual(
+    result.placements.map((placement) => placement.partId),
+    ["copy", "copy", "copy"]
+  );
+  assert.deepEqual(
+    result.placements.map((placement) => placement.instanceId).sort(),
+    [0, 1, 2]
+  );
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("nests parts that contain holes", async () => {
+  const created = (await createJob(jobBody([{ id: "holey", data: partHoleSvg }])))
+    .json;
+  const id = created.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 ? res.json : null;
+  }, { message: "no result for part with a hole" });
+
+  assert.equal(result.placements.length, 1);
+  assert.equal(result.placements[0].partId, "holey");
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("rejects reserved engine fields leaked through config", async () => {
+  const withBin = await createJob(
+    jobBody([{ id: "p", data: partSvg }], {
+      config: { units: "mm", spacing: 0, bin: { width: 1, height: 1 } },
+    })
+  );
+  assert.equal(withBin.status, 400);
+  assert.equal(withBin.json.error.code, "INVALID_CONFIG");
+
+  const withTimeout = await createJob(
+    jobBody([{ id: "p", data: partSvg }], {
+      config: { units: "mm", spacing: 0, timeout: 10 },
+    })
+  );
+  assert.equal(withTimeout.status, 400);
+  assert.equal(withTimeout.json.error.code, "INVALID_CONFIG");
 });

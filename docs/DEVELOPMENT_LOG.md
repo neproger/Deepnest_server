@@ -566,3 +566,134 @@ time limit → completed, delete running → 409, unknown job → 404.
 2. Job Manager: вынести в `src/api`/`src/jobs` финализацию; рассмотреть
    `maxConcurrentJobs > 1` после проверки engine lifecycle.
 3. Начать отделять `SVG adapter → geometry → core` (см. PROJECT_VISION).
+
+---
+
+## 2026-09-25 — Legacy HTTP removal / Job API becomes baseline
+
+### Goal
+
+Сделать `/api/v1/jobs` единственной публичной HTTP-границей: удалить legacy
+`POST /nest` + multipart/busboy, предварительно подтвердив capability parity
+по возможностям (не по HTTP-формату).
+
+### Starting state
+
+- `npm test` = 10/10 PASS (core, native addon, legacy `/nest`, Job API)
+- Job API commit: `e47e9a4`; docs follow-up `9f411d9`
+
+### Capability parity audit
+
+| Capability | Legacy `/nest` | Job API `/api/v1/jobs` | Core support | Test coverage |
+|---|---|---|---|---|
+| engine config passthrough | `...config` | `...spec.config` в `nest()` | yes | `config passthrough` test |
+| spacing | yes | yes (`config.spacing`) | yes | via config test |
+| rotations | yes | yes, `rotations=1` observable | yes | `rotations=1` test |
+| populationSize / mutationRate | yes | yes | yes | config test (non-default) |
+| placementType / fitness | yes | yes (`gravity`/`box`/`convexhull`) | yes | config test (`box`) |
+| mergeLines | yes (default true) | yes | yes | `result.svg` path |
+| curveTolerance | yes | yes | yes | config test (`0.5`) |
+| simplify | yes | yes | yes* | — (*known `d3` debt, не трогали) |
+| timeRatio | yes | yes | yes | config default |
+| progress | SSE `progress` | SSE `engine.progress` | yes | SSE test |
+| progress phase | yes | yes (`phase`) | yes | SSE test |
+| best/current placement | на событии | `GET /result` в любой момент | yes | create/result test |
+| final/current SVG | `svg()` в SSE | `GET /result.svg` | yes | create test |
+| abort | закрытие соединения | `POST /stop`, idempotent | yes | stop/delete tests |
+| multiple parts | yes | yes | yes | create test (2 parts) |
+| holes | engine-level | yes (SVG pass-through) | yes | `holes` test |
+| quantity/copies | нет | `quantity` → instances | yes | `quantity` test (3) |
+| sheet/bin handling | hardcoded object bin (override via config) | SVG bin document (`bin.id`/`bin.data`) | yes | create test (`sheetId`) |
+| stable client IDs | нет | `partId`/`instanceId`/`sheetId` | adapter | stable ids test |
+
+Вывод: Job API — надмножество полезных возможностей сервера; multipart-контракт
+больше ничего не защищает.
+
+### Tried / Changed
+
+1. `server.mjs` сокращён до bootstrap: `express.json` + `GET /health` +
+   `app.use("/api/v1", jobsRouter)` + error middleware + `start()`.
+   Удалены: `busboy` import, `parseForm`, `nestSSE`, `POST /nest`,
+   `node:stream/consumers`, зависимость `nest` из `index.node.mjs`.
+   Globals (jsdom/DOMParser) по-прежнему поднимаются через
+   `JobManager → job.mjs → index.node.mjs`.
+2. `src/jobs/input.mjs`: добавлен guard на reserved-ключи config
+   (`bin`, `progressCallback`, `timeout`) → `INVALID_CONFIG`.
+3. Удалён `tests/server/server.test.mjs` (тестировал только `/nest`).
+4. `package.json` → удалён `busboy`; `npm install` (lock обновлён).
+5. Tests: добавлены parity-тесты — config passthrough (`rotations=1`),
+   `quantity=3`, part с отверстием, reserved config guard; в SSE-тест
+   добавлена проверка `engine.progress`.
+6. `README.md`: `/api/v1` — единственный документированный API, добавлен
+   полный lifecycle-пример; убрано упоминание legacy `/nest`.
+
+### Successful
+
+* `/nest` отсутствует; multipart-контракт отсутствует; `busboy` удалён.
+* Job API покрывает все полезные возможности старого server.
+* `server.mjs` содержит только bootstrap/router wiring.
+* Новый HTTP E2E baseline (`tests/server/jobs.test.mjs`) проходит реальный
+  путь: `POST /api/v1/jobs → nest() → worker_threads → native addon →
+  progress → best result → result.svg → stop`.
+* `npm test` = 13/13 PASS.
+
+### Problems found
+
+#### Problem: config мог утащить adapter-поля (`bin`/`timeout`/`progressCallback`)
+
+Observed: `nest()` destructures `timeout`, `progressCallback`, `bin` поверх
+spread-конфига; клиентский `config.timeout` мог тихо включить engine-timeout,
+не меняя job lifecycle.
+
+Resolution: reserved-ключи отклоняются на входе (`INVALID_CONFIG`). Status: fixed.
+
+#### Problem: старый E2E тест исчезал вместе с `/nest`
+
+Observed: `tests/server/server.test.mjs` проверял только legacy route.
+
+Resolution: end-to-end покрытие перенесено в `tests/server/jobs.test.mjs`
+(реальный engine, без mock). Status: resolved.
+
+### Verification
+
+```bash
+npm test
+```
+
+Results:
+
+* core nest: PASS
+* core native addon: PASS
+* Job API (`tests/server/jobs.test.mjs`): 11/11 PASS
+* итого: `# tests 13 / # pass 13 / # fail 0` (~4.8s)
+
+Сценарии Job API: create+status, result while running, stable ids, SSE
+(`job.status`/`job.started`/`engine.progress`/`result.updated`), stop, next job,
+queue, sequential isolation, invalid input/errors, time limit→completed,
+delete running→409, config passthrough (`rotations=1`), quantity, holes,
+reserved config guard.
+
+### Current known-good baseline
+
+1. `npm start` — `GET /health` + `/api/v1/jobs` только.
+2. `npm test` — 13/13 PASS.
+3. Публичная граница: `/api/v1`; внутренний `nest()` не является обещанием
+   стабильного API.
+4. Concurrency `maxConcurrentJobs = 1`; очередь автоматически продвигается.
+
+### Debt (не трогали)
+
+- CLI (`cli.mjs`, `commander`, `ora`);
+- jsdom/DOM в core, SVG parser, canonical geometry, native ABI;
+- `simplify:true` + `d3` (известный debt);
+- `sheetId` пока всегда `bin.id`; `instanceId` вычисляется адаптером;
+- best result и svg-функция в памяти до `DELETE`;
+- `express`/`ora`/`fs-extra` версии не пересматривались.
+
+### Next
+
+1. Отдельный этап: определить границу `svgparser.js` ↔ polygon tree (какой
+   минимальный объект реально является входом алгоритма) и из него вывести
+   Canonical Geometry boundary.
+2. Не удалять `jsdom` до появления этой границы.
+3. Затем — SVG adapter как один из geometry adapters, DOM-independent core.

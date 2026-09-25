@@ -56,14 +56,16 @@ node cli.mjs     # run the CLI
 
 ### HTTP API
 
-The new Job API is versioned under `/api/v1`:
+`/api/v1` is the public HTTP boundary. The internal `nest()` is not a stable
+external API and may be refactored (SVG parser, DOM, canonical geometry,
+workers, native addon) without changing `/api/v1` semantics.
 
 ```text
 POST   /api/v1/jobs              create a job (202 + jobId)
 GET    /api/v1/jobs/:id          lifecycle snapshot
 GET    /api/v1/jobs/:id/result   best structured placements
 GET    /api/v1/jobs/:id/result.svg
-GET    /api/v1/jobs/:id/events   SSE: job.started / engine.progress / result.updated / job.stopped / job.completed / job.failed
+GET    /api/v1/jobs/:id/events   SSE: job.status / job.started / engine.progress / result.updated / job.stopped / job.completed / job.failed
 POST   /api/v1/jobs/:id/stop     stop the job (idempotent)
 DELETE /api/v1/jobs/:id          delete a finished job
 GET    /health
@@ -85,19 +87,49 @@ GET    /health
 }
 ```
 
+Full lifecycle example:
+
+```sh
+# 1. create (returns 202 + jobId)
+curl -s -X POST http://127.0.0.1:8080/api/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{"input":{"format":"svg","bin":{"id":"sheet-1","data":"<svg/>"},"parts":[{"id":"part-A","data":"<svg/>"}]},"config":{"units":"mm"}}'
+# {"jobId":"<id>","status":"queued"}
+
+# 2. poll status (placementComplete is independent of status=="completed")
+curl -s http://127.0.0.1:8080/api/v1/jobs/<id>
+
+# 3. best placements (available while still running)
+curl -s http://127.0.0.1:8080/api/v1/jobs/<id>/result
+
+# 4. optional SVG rendering of the best result
+curl -s http://127.0.0.1:8080/api/v1/jobs/<id>/result.svg
+
+# 5. live events (SSE)
+curl -N http://127.0.0.1:8080/api/v1/jobs/<id>/events
+
+# 6. stop, then delete
+curl -s -X POST http://127.0.0.1:8080/api/v1/jobs/<id>/stop
+curl -s -X DELETE http://127.0.0.1:8080/api/v1/jobs/<id>
+```
+
 Placements use the client's own ids: `{ partId, instanceId, sheetId, x, y, rotation }`.
 `placementComplete` means every part is placed in the current best result; it is
 independent of `job.status === "completed"` (the genetic search may keep
-improving until stopped or `execution.timeLimitMs` elapses). Concurrency is
-`maxConcurrentJobs = 1`; additional jobs are queued.
+improving until stopped or `execution.timeLimitMs` elapses). Lifecycle:
+`queued → running → stopped | completed | failed` (`completed` only for a
+configured `execution.timeLimitMs`). Concurrency is `maxConcurrentJobs = 1`;
+extra jobs are queued and start automatically.
 
-The legacy `POST /nest` (multipart, SSE) endpoint is kept as a regression
-baseline. See `docs/DEVELOPMENT_LOG.md` for details.
+`config` is passed through to the engine (spacing, rotations, populationSize,
+mutationRate, placementType, mergeLines, curveTolerance, simplify, timeRatio,
+units, scale, endpointTolerance, ...). The adapter reserves `bin`,
+`progressCallback`, `timeout` and rejects them inside `config`.
 
 ### Test
 
 ```sh
-npm test          # core + native addon + HTTP server (legacy + Job API)
+npm test          # core + native addon + Job API end-to-end
 npm run test:core
 npm run test:server
 ```
