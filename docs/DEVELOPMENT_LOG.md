@@ -1180,7 +1180,7 @@ npm test   # 38/38 PASS
 
 ### Commit
 
-Фиксируется отдельным commit этого этапа (hash добавляется следом).
+`b588635 test: document winding contract and harden sheet handling`.
 
 ### Далее
 
