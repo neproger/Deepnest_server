@@ -1276,7 +1276,7 @@ false). Логика ошибок worker сохранена (guard из прош
 
 ### Commit
 
-Фиксируется отдельным commit этого этапа (hash добавляется следом).
+`ba0c178 feat: partial placement and finite/auto sheet policy`.
 
 ### Далее
 
