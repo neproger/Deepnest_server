@@ -577,6 +577,8 @@ time limit → completed, delete running → 409, unknown job → 404.
 `POST /nest` + multipart/busboy, предварительно подтвердив capability parity
 по возможностям (не по HTTP-формату).
 
+Cleanup commit: `ce5ebac`.
+
 ### Starting state
 
 - `npm test` = 10/10 PASS (core, native addon, legacy `/nest`, Job API)
