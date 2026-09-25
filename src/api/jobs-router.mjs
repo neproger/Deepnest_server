@@ -59,8 +59,15 @@ export function createJobsRouter(manager) {
   router.get("/jobs/:id/result.svg", (req, res) => {
     try {
       const job = manager.require(req.params.id);
-      if (!job.svgFn) {
+      if (!job.result) {
         throw httpError(409, "INVALID_JOB_STATE", "No placement available yet");
+      }
+      if (!job.svgFn) {
+        throw httpError(
+          400,
+          "RESULT_FORMAT_UNAVAILABLE",
+          "SVG result is not available for this input format"
+        );
       }
       res.type("image/svg+xml").send(job.svgFn());
     } catch (error) {

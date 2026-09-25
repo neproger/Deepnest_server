@@ -39,6 +39,54 @@ function jobBody(parts, extra = {}) {
   };
 }
 
+const geoSheet = () => ({
+  id: "g-sheet",
+  quantity: 1,
+  polygontree: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 300, y: 0 },
+      { x: 300, y: 200 },
+      { x: 0, y: 200 },
+    ],
+    children: [],
+  },
+});
+
+const geoPart = (id, quantity = 1, withHole = false) => ({
+  id,
+  quantity,
+  polygontree: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 80, y: 0 },
+      { x: 80, y: 50 },
+      { x: 0, y: 50 },
+    ],
+    children: withHole
+      ? [
+          {
+            points: [
+              { x: 20, y: 15 },
+              { x: 40, y: 15 },
+              { x: 40, y: 30 },
+              { x: 20, y: 30 },
+            ],
+            children: [],
+          },
+        ]
+      : [],
+  },
+});
+
+function geometryBody(parts, extra = {}) {
+  return {
+    input: { format: "geometry", units: "mm", sheets: [geoSheet()], parts },
+    config: { spacing: 0, timeRatio: 0 },
+    ...extra,
+  };
+}
+
 async function createJob(body) {
   const res = await fetch(`${base}/api/v1/jobs`, {
     method: "POST",
@@ -460,4 +508,199 @@ test("rejects reserved engine fields leaked through config", async () => {
   );
   assert.equal(withTimeout.status, 400);
   assert.equal(withTimeout.json.error.code, "INVALID_CONFIG");
+});
+
+test("geometry input: stable ids, quantity, holes and structured result", async () => {
+  const created = await createJob(
+    geometryBody([geoPart("g-A", 2, true), geoPart("g-B")])
+  );
+  assert.equal(created.status, 202, "POST /jobs geometry must return 202");
+  const id = created.json.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 ? res.json : null;
+  }, { message: "geometry job produced no result while running" });
+
+  assert.equal(result.placements.length, 3);
+  assert.deepEqual(
+    result.placements.map((p) => p.partId).sort(),
+    ["g-A", "g-A", "g-B"]
+  );
+  assert.ok(
+    result.placements.every((p) => p.sheetId === "g-sheet"),
+    "sheet id must round-trip unchanged"
+  );
+  for (const placement of result.placements) {
+    assert.equal(typeof placement.x, "number");
+    assert.equal(typeof placement.y, "number");
+    assert.equal(typeof placement.rotation, "number");
+    assert.ok(Number.isInteger(placement.instanceId));
+  }
+
+  await waitFor(
+    async () => (await getJson(`/api/v1/jobs/${id}`)).json?.placementComplete,
+    { message: "geometry placement never completed" }
+  );
+
+  // Geometry jobs have no source SVG, so result.svg is unavailable.
+  const svg = await getJson(`/api/v1/jobs/${id}/result.svg`);
+  assert.equal(svg.status, 400);
+  assert.equal(svg.json.error.code, "RESULT_FORMAT_UNAVAILABLE");
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("geometry input: streams the same SSE lifecycle", async () => {
+  const blocker = (await createJob(geometryBody([geoPart("g-blocker")]))).json;
+  await waitFor(async () => (await statusOf(blocker.jobId)) === "running");
+
+  const queued = (await createJob(geometryBody([geoPart("g-sse")]))).json;
+  assert.equal(await statusOf(queued.jobId), "queued");
+
+  const controller = new AbortController();
+  const events = [];
+  const response = await fetch(`${base}/api/v1/jobs/${queued.jobId}/events`, {
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") || "", /text\/event-stream/);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const consume = () => {
+    let index;
+    while ((index = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      const event = block.split("\n").find((line) => line.startsWith("event:"));
+      const data = block.split("\n").find((line) => line.startsWith("data:"));
+      if (event && data) {
+        events.push({
+          type: event.slice(6).trim(),
+          data: JSON.parse(data.slice(5).trim()),
+        });
+      }
+    }
+  };
+
+  await stopJob(blocker.jobId);
+  try {
+    while (!events.some((event) => event.type === "result.updated")) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      consume();
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    controller.abort();
+    reader.cancel().catch(() => {});
+  }
+
+  assert.ok(events.some((event) => event.type === "job.started"));
+  assert.ok(events.some((event) => event.type === "engine.progress"));
+  assert.ok(events.some((event) => event.type === "result.updated"));
+
+  await stopJob(queued.jobId);
+  await waitFor(async () => (await statusOf(queued.jobId)) === "stopped");
+  await deleteJob(blocker.jobId);
+  await deleteJob(queued.jobId);
+});
+
+test("geometry input: rejects invalid geometry and structure", async () => {
+  const emptyPoints = await createJob(
+    geometryBody([
+      {
+        id: "p",
+        polygontree: { points: [], children: [] },
+      },
+    ])
+  );
+  assert.equal(emptyPoints.status, 400);
+  assert.equal(emptyPoints.json.error.code, "INVALID_GEOMETRY");
+
+  const nanPoint = await createJob(
+    geometryBody([
+      {
+        id: "p",
+        polygontree: {
+          points: [
+            { x: 0, y: 0 },
+            { x: Number.NaN, y: 1 },
+            { x: 2, y: 2 },
+          ],
+          children: [],
+        },
+      },
+    ])
+  );
+  assert.equal(nanPoint.status, 400);
+  assert.equal(nanPoint.json.error.code, "INVALID_GEOMETRY");
+
+  const badQuantity = await createJob(
+    geometryBody([
+      {
+        id: "p",
+        quantity: 0,
+        polygontree: { points: geoPart("x").polygontree.points, children: [] },
+      },
+    ])
+  );
+  assert.equal(badQuantity.status, 400);
+  assert.equal(badQuantity.json.error.code, "INVALID_GEOMETRY");
+
+  const missingId = await createJob(
+    geometryBody([
+      {
+        polygontree: { points: geoPart("x").polygontree.points, children: [] },
+      },
+    ])
+  );
+  assert.equal(missingId.status, 400);
+  assert.equal(missingId.json.error.code, "INVALID_GEOMETRY");
+
+  const badChildren = await createJob(
+    geometryBody([
+      {
+        id: "p",
+        polygontree: {
+          points: geoPart("x").polygontree.points,
+          children: "nope",
+        },
+      },
+    ])
+  );
+  assert.equal(badChildren.status, 400);
+  assert.equal(badChildren.json.error.code, "INVALID_GEOMETRY");
+
+  const noSheets = await createJob({
+    input: { format: "geometry", units: "mm", sheets: [], parts: [geoPart("p")] },
+    config: { spacing: 0 },
+  });
+  assert.equal(noSheets.status, 400);
+  assert.equal(noSheets.json.error.code, "INVALID_REQUEST");
+
+  const noParts = await createJob({
+    input: { format: "geometry", units: "mm", sheets: [geoSheet()], parts: [] },
+    config: { spacing: 0 },
+  });
+  assert.equal(noParts.status, 400);
+  assert.equal(noParts.json.error.code, "INVALID_REQUEST");
+
+  const multiSheet = await createJob({
+    input: {
+      format: "geometry",
+      units: "mm",
+      sheets: [geoSheet(), geoSheet()],
+      parts: [geoPart("p")],
+    },
+    config: { spacing: 0 },
+  });
+  assert.equal(multiSheet.status, 400);
+  assert.equal(multiSheet.json.error.code, "INVALID_GEOMETRY");
 });

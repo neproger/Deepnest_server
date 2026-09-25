@@ -297,6 +297,38 @@ multiple sheets are representable structurally but not guaranteed by the engine.
 - `main/nestingToSVG.mjs` remains DOM-coupled and is injected only on the SVG
   path; canonical nesting works without it.
 
+### Public JSON Geometry DTO vs Internal Canonical Geometry
+
+The HTTP contract must be plain, serialisable JSON, while internal canonical
+geometry represents a polygon as a JS Array carrying an array property
+(`polygon.children`) — which JSON cannot express naturally. The two
+representations are intentionally separate:
+
+```text
+Public JSON Geometry            PolygonDTO { points: PointDTO[], children?: PolygonDTO[] }
+      │                         PointDTO   { x: number, y: number }
+      ▼
+JSON Geometry Adapter           src/geometry/json-adapter.mjs
+      │
+      ▼
+Internal Canonical Geometry     Array<{x,y}> with .children
+```
+
+The HTTP input layer (`src/jobs/input.mjs`) selects the adapter by
+`input.format`:
+
+```text
+format: "svg"       → src/geometry/svg-adapter.mjs  → canonical + renderContext
+format: "geometry"  → src/geometry/json-adapter.mjs → canonical (no renderContext)
+                       │
+                       └──► same nestGeometry() engine path
+```
+
+The Job / JobManager do not know which format was used. Geometry jobs have no
+source SVG, so `GET /result.svg` returns `RESULT_FORMAT_UNAVAILABLE`; structured
+`GET /result` works identically. The public geometry contract accepts exactly
+one sheet for now (multi-sheet identity is not guaranteed yet).
+
 ## Candidate Canonical Boundary
 
 From the analysis above:

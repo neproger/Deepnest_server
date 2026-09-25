@@ -1,3 +1,8 @@
+// Node runtime bootstrap: installs jsdom-backed DOM globals used by the SVG
+// input adapter and the SVG renderer. Geometry-only jobs do not need DOM, but
+// the server supports both.
+import "./index.node.mjs";
+
 import express from "express";
 import { pathToFileURL } from "url";
 import { JobManager } from "./src/jobs/job-manager.mjs";

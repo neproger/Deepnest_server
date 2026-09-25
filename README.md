@@ -73,7 +73,10 @@ DELETE /api/v1/jobs/:id          delete a finished job
 GET    /health
 ```
 
-`POST /api/v1/jobs` body:
+`POST /api/v1/jobs` accepts two input formats on the same endpoint. Both produce
+the same structured result model.
+
+**`format: "svg"`** — geometry is sent as SVG documents:
 
 ```json
 {
@@ -89,7 +92,84 @@ GET    /health
 }
 ```
 
-Full lifecycle example:
+**`format: "geometry"`** — geometry is sent as plain polygons. This path does not
+use SVG, jsdom, or the SVG parser; the request is converted into Canonical
+Geometry (see `docs/GEOMETRY_PIPELINE.md`). The public DTO is
+`{ points: [{x,y}], children?: [...] }` (a serialisable representation; the
+internal canonical polygon tree is different):
+
+```json
+{
+  "input": {
+    "format": "geometry",
+    "units": "mm",
+    "sheets": [
+      {
+        "id": "sheet-A",
+        "quantity": 1,
+        "polygontree": {
+          "points": [
+            { "x": 0, "y": 0 },
+            { "x": 300, "y": 0 },
+            { "x": 300, "y": 200 },
+            { "x": 0, "y": 200 }
+          ],
+          "children": []
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part-A",
+        "quantity": 2,
+        "polygontree": {
+          "points": [
+            { "x": 0, "y": 0 },
+            { "x": 80, "y": 0 },
+            { "x": 80, "y": 50 },
+            { "x": 0, "y": 50 }
+          ],
+          "children": [
+            {
+              "points": [
+                { "x": 20, "y": 15 },
+                { "x": 40, "y": 15 },
+                { "x": 40, "y": 30 },
+                { "x": 20, "y": 30 }
+              ],
+              "children": []
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "config": { "spacing": 2, "rotations": 4 }
+}
+```
+
+```sh
+# geometry input, same job lifecycle as SVG
+curl -s -X POST http://127.0.0.1:8080/api/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{"input":{"format":"geometry","units":"mm","sheets":[{"id":"sheet-A","quantity":1,"polygontree":{"points":[{"x":0,"y":0},{"x":300,"y":0},{"x":300,"y":200},{"x":0,"y":200}],"children":[]}}],"parts":[{"id":"part-A","quantity":2,"polygontree":{"points":[{"x":0,"y":0},{"x":80,"y":0},{"x":80,"y":50},{"x":0,"y":50}],"children":[]}}]},"config":{"spacing":2}}'
+# {"jobId":"<id>","status":"queued"}
+```
+
+Notes on `format: "geometry"`:
+
+- Coordinates may use any unit, but they must be consistent; `spacing` and
+  `curveTolerance` use the same unit. `units` is metadata only.
+- Exactly one sheet is accepted for now (identity for multiple sheets is not
+  guaranteed yet).
+- `GET /result.svg` is unavailable and returns
+  `400 {"error":{"code":"RESULT_FORMAT_UNAVAILABLE",...}}`. `GET /result` still
+  works.
+- Holes are represented as recursive `children`. Current engine semantics are
+  guaranteed for an outer polygon with direct hole children; deeper nesting is
+  representable but not guaranteed by NFP processing.
+
+Full lifecycle example (SVG; identical for geometry except `result.svg`):
 
 ```sh
 # 1. create (returns 202 + jobId)
@@ -104,7 +184,7 @@ curl -s http://127.0.0.1:8080/api/v1/jobs/<id>
 # 3. best placements (available while still running)
 curl -s http://127.0.0.1:8080/api/v1/jobs/<id>/result
 
-# 4. optional SVG rendering of the best result
+# 4. optional SVG rendering of the best result (SVG input only)
 curl -s http://127.0.0.1:8080/api/v1/jobs/<id>/result.svg
 
 # 5. live events (SSE)

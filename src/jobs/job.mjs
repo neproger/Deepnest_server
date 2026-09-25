@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { nest } from "../../index.node.mjs";
-import { toNestInput, toExternalResult } from "./input.mjs";
+import { adaptInput, toExternalResult } from "./input.mjs";
+import { nestWithRender } from "../geometry/engine.mjs";
 
 const TERMINAL = new Set(["stopped", "completed", "failed"]);
 
@@ -20,7 +20,7 @@ export class Job {
     this.id = randomUUID();
     this.manager = manager;
     this.spec = spec;
-    this.binId = spec.bin.id;
+    this.binId = spec.sheetId;
 
     this.status = "queued";
     this.createdAt = new Date().toISOString();
@@ -31,6 +31,7 @@ export class Job {
     this.result = null;
     this.rawResult = null;
     this.svgFn = null;
+    this.svgAvailable = false;
     this.placementComplete = false;
     this.resultUpdatedAt = null;
     this.error = null;
@@ -75,13 +76,16 @@ export class Job {
     this.emit("job.started", { jobId: this.id });
 
     try {
-      const { svgInput, bin } = toNestInput(this.spec);
-      this.abort = await nest(
-        svgInput,
+      const { geometry, renderContext, engineOptions } = await adaptInput(
+        this.spec
+      );
+      this.svgAvailable = Boolean(renderContext);
+      this.abort = await nestWithRender(
+        geometry,
+        renderContext,
         ({ data, status, svg }) => this.onResult({ data, status, svg }),
         {
-          ...this.spec.config,
-          bin,
+          ...engineOptions,
           progressCallback: (progress) => this.onProgress(progress),
         }
       );

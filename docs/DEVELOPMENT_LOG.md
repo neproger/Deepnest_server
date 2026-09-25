@@ -968,3 +968,122 @@ lazy svgparser в `deepnest.js` и явная canonical-проекция.
 2. Закрыть открытые вопросы: winding convention, depth>1 policy, multiple
    sheets (`sheetId`), ownership of units in future adapters.
 3. `jsdom` не удалять: SVG adapter и renderer пока на нём (и это допустимо).
+
+---
+
+## 2026-09-25 — Public `format: "geometry"` Job input
+
+### Goal
+
+Добавить публичный JSON geometry input в существующий `/api/v1/jobs`, используя
+уже реализованную Canonical Geometry boundary. Не менять engine math, workers,
+NFP, native addon, SVG parser/renderer.
+
+### Архитектурная проверка
+
+Границы выбраны верно: `Job`/`JobManager`/engine **не знают** про формат.
+Формат-специфичное решение сосредоточено в `src/jobs/input.mjs` (selection) и
+`src/geometry/json-adapter.mjs` (DTO→canonical). Job просто вызывает
+`adaptInput(spec)` → `nestWithRender(geometry, renderContext, ...)`.
+
+```text
+POST /api/v1/jobs
+   ↓ validateRequest(body)              (src/jobs/input.mjs)
+   ↓ adaptInput(spec)
+   ├─ format "svg"      → svg-adapter  → geometry + renderContext(nestingToSVG)
+   └─ format "geometry" → json-adapter → geometry (renderContext = null)
+   ↓
+nestWithRender()/nestGeometry()          (existing engine, unchanged)
+```
+
+### Public JSON DTO
+
+```text
+PolygonDTO { points: PointDTO[], children?: PolygonDTO[] }
+PointDTO   { x: number, y: number }
+```
+
+DTO ≠ internal canonical: canonical polygon — JS Array с array-property
+`children` (JSON так не умеет). Adapter конвертирует DTO → canonical tree.
+
+### Что сделано
+
+- `src/geometry/json-adapter.mjs` — `parseGeometryInput()`: DTO → canonical;
+  `GeometryValidationError` (`INVALID_GEOMETRY`) на bad points/<3/NaN/children.
+- `src/jobs/input.mjs` — `validateRequest()` теперь dispatch по
+  `input.format`; `adaptInput(spec)` возвращает
+  `{ geometry, renderContext, engineOptions }`; единые config/execution guards;
+  engine-options учитывают разное значение spacing (SVG: `spacing*ratio*scale`,
+  geometry: canonical as-is). `nestingToSVG` грузится dynamic import-ом только
+  на SVG-ветке.
+- `src/jobs/job.mjs` — больше не импортирует `index.node.mjs`; вызывает
+  `adaptInput` + `nestWithRender`; хранит `spec.sheetId`, `svgAvailable`.
+- `server.mjs` — side-effect `import "./index.node.mjs"` (Node bootstrap DOM для
+  SVG-ветки); теперь именно server выбирает DOM-адаптер.
+- `src/api/jobs-router.mjs` — `GET result.svg`: при `format:"geometry"` возвращает
+  `400 RESULT_FORMAT_UNAVAILABLE`; `GET result` работает как раньше.
+- `README.md`, `docs/GEOMETRY_PIPELINE.md` — оба input format + distinction
+  Public DTO vs Internal Canonical.
+
+### Schema / правила
+
+- `input.format` = `"svg"` | `"geometry"`.
+- geometry: `input.sheets` (только один sheet сейчас), `input.parts`,
+  `input.units?` (metadata); `config.spacing` — в canonical units.
+- Stable IDs: `part.id`/`sheet.id` проходят в `partId`/`sheetId` без изменений.
+- Quantity поддерживается canonical semantics.
+- Holes — recursive `children`.
+- Validation split: структура запроса → `INVALID_REQUEST`;
+  геометрия (points/<3/NaN/quantity/children/id) → `INVALID_GEOMETRY`.
+- Multiple sheets: representable, но HTTP пока требует ровно один
+  (`INVALID_GEOMETRY`) — чтобы не возвращать неверную identity.
+- Winding: без auto-correction, текущие semantics; гарантия — outer + direct
+  holes. Depth>1 representable, но не гарантируется.
+
+### Problems found / решения
+
+#### Problem: JSON не выражает array-property `polygon.children`
+
+Resolution: отдельный transport DTO `{points, children}` + json-adapter.
+Status: fixed.
+
+#### Problem: DOM ставился неявно через job.mjs (`index.node.mjs`)
+
+Observed: после переноса Job на adapters `svgparser`/renderer могли грузиться
+без globals.
+
+Resolution: `nestingToSVG` грузится dynamic import-ом только для SVG; DOM-
+bootstrap теперь явно в `server.mjs` (`import "./index.node.mjs"`). Geometry-ветка
+DOM не трогает. Status: fixed.
+
+#### Problem: geometry job не должен отдавать сырой 409 на result.svg
+
+Resolution: `RESULT_FORMAT_UNAVAILABLE` (400) при наличии result, но отсутствии
+SVG renderer. Status: fixed.
+
+### Verification
+
+```bash
+npm test   # 27/27 PASS
+```
+
+Новые HTTP integration tests (`tests/server/jobs.test.mjs`):
+- geometry create + stable ids (`partId`/`sheetId`) + quantity + holes + result
+  while running;
+- geometry SSE (`job.started`/`engine.progress`/`result.updated`);
+- geometry `result.svg` → `RESULT_FORMAT_UNAVAILABLE`;
+- invalid geometry/structure: empty points, NaN, quantity 0, missing id,
+  malformed children, no sheets/parts, multiple sheets.
+
+Регрессия: все прежние 24 теста зелёные (SVG public API не менялся).
+
+### Commit
+
+Фиксируется отдельным commit этого этапа (hash добавляется следом).
+
+### Далее
+
+Не выбирать следующий шаг автоматически. Оценить реальные ограничения, которые
+проявились после второго независимого input adapter: winding, multiple sheets,
+topology depth, result rendering (geometry→SVG), CLI, native ABI. По фактической
+боли выбрать следующий этап.
