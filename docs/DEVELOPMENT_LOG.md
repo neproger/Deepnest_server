@@ -712,6 +712,8 @@ Deepnest. Результат: `docs/GEOMETRY_PIPELINE.md`.
 
 Production behavior не изменялся.
 
+Investigation commit: `fe80ee4`.
+
 ### Что исследовали
 
 - `main/svgparser.js`, `main/deepnest.js`, `main/background.js`,
