@@ -699,3 +699,134 @@ reserved config guard.
    Canonical Geometry boundary.
 2. Не удалять `jsdom` до появления этой границы.
 3. Затем — SVG adapter как один из geometry adapters, DOM-independent core.
+
+---
+
+## 2026-09-25 — Geometry pipeline investigation
+
+### Goal
+
+Исследовать (не менять) фактическую геометрическую границу между SVG parsing и
+nesting algorithm. Определить минимальный plain-JS объект — фактический вход
+Deepnest. Результат: `docs/GEOMETRY_PIPELINE.md`.
+
+Production behavior не изменялся.
+
+### Что исследовали
+
+- `main/svgparser.js`, `main/deepnest.js`, `main/background.js`,
+  `main/processPair.mjs`, `main/processPairs.node.mjs`,
+  `main/util/{geometryutil,clipper,simplify}.js`, `main/nestingToSVG.mjs`,
+  `index.mjs`, `index.node.mjs`.
+- Runtime probe (`probe.tmp.mjs`, временный, удалён после исследования):
+  разбор fixture с внешним контуром + hole, импорт bin, перехват
+  `background-start` payload, плюс synthetic polygon tree без SVG parser.
+
+### Неожиданные детали
+
+- В worker payload **нет ключа `parts`**: геометрия лежит в
+  `payload.individual.placement[]` (это GA seed `adam`), а metadata — в
+  параллельных массивах `ids/sources/children/filenames/rotation`.
+- `individual.placement[i]` — это **сам polygon tree** (не `.polygontree`).
+- `placement.rotation` на этом этапе отсутствует; углы лежат в параллельном
+  `individual.rotation`.
+- `part.area` создаётся (`getParts`), но **нигде не читается** — dead field.
+- `bounds` и `svgelements` нужны только `nestingToSVG`, в worker не уходят.
+- `filename` в probe = `null`, т.к. `importsvg` вызывался с `null`; в реальном
+  `index.mjs`/Job API filename = basename(id).
+- `sources` в payload = `[1,2]` (bin занимает `parts[0]`) — подтверждает
+  offset `source`.
+
+### Фактический polygon format
+
+- polygon = plain `Array<{x, y}>`; array-свойства: `source`, `children`, `id`,
+  (на holes) `parent`. Array props легальны, т.к. массивы — объекты.
+- После import точки имеют только `{x,y}`. `exact` добавляется позже
+  (`simplifyPolygon`) и используется `mergedLength`.
+- `cloneTree` в payload оставляет на root `children/id/source/filename`, точки
+  `{x,y,exact}`; у вложенных holes — только точки (metadata снимается).
+
+### Holes topology
+
+- `toTree` строит вложенность по containment (`Clipper.PointInPolygon`), не по
+  winding; рекурсия → структура поддерживает произвольную глубину.
+- NFP/placement (`getOuterNfp`, `getInnerNfp`, native `calculateNFP`) используют
+  только **прямые** `children` (один уровень holes). Islands глубже структурно
+  сохраняются, но математикой явно не моделируются.
+
+### Curve flattening
+
+- Curves → points в `polygonifyPath`/`polygonify` через
+  `GeometryUtil.*.linearize` с tolerance = `config.curveTolerance`.
+- Ниже parser'а curves не существуют; core видит только точки.
+- RDP simplify (`util/simplify.js`) применяется в `DeepNest.simplifyPolygon`;
+  `config.simplify:true` уходит в `getHull` → глобальный `d3` (известный debt).
+
+### DOM boundary
+
+- DOM нужен до `getParts` включительно (DOMParser/SVGPathElement/pathSegList).
+- После сборки payload в `deepNest.start` DOM не нужен: `cloneTree/offsetTree/
+  polygonOffset/simplifyPolygon/clipper` работают с plain arrays.
+- **Кандидатная граница:** объект
+  `{ quantity, sheet, polygontree: cloneTree(...), filename }` прямо перед
+  `worker.postMessage`.
+- `svgelements` остаётся в main thread и нужен только `nestingToSVG` (renderer).
+
+### Synthetic experiment
+
+- Создали `new DeepNest(...)`, вручную заполнили `deepNest.parts` plain polygon
+  trees (лист + деталь с hole), вызвали `start()` → payload собрался, holes
+  сохранились, точки `{x,y,exact}`. **Engine запускается без SVG parser и DOM.**
+- Зафиксировано тестом `tests/core/geometry.test.mjs` (3 теста), без изменения
+  production API.
+
+### Известные открытые вопросы
+
+- depth > 1 (islands) структурно есть, NFP не использует.
+- multiple sheets структурно есть, `index.mjs` импортирует один bin; `sheetId`
+  для >1 sheet не проверен.
+- units/scale: parser запекает `scale/localscale` в точки; canonical должен
+  определить единицы.
+- winding/orientation: import решает holes по containment, а clipper/native
+  разворачивают по знаку площади — нужна ли winding-конвенция, не решено.
+
+### Changes made
+
+- `docs/GEOMETRY_PIPELINE.md` — новый (фактический flow, структуры, границы,
+  candidate canonical boundary, open questions).
+- `tests/core/geometry.test.mjs` — новый research/regression test (3 теста):
+  polygon tree с hole, DOM-free worker payload, synthetic geometry без SVG.
+- `README.md` — ссылка на GEOMETRY_PIPELINE.
+- `docs/DEVELOPMENT_LOG.md` — эта запись.
+- production-код не менялся.
+
+### Verification
+
+```bash
+node --test tests/core/geometry.test.mjs   # 3/3 PASS (~0.8s)
+npm test
+```
+
+Results: `npm test` полностью зелёный (core nest, native addon, geometry,
+Job API). Runtime probe удалён (`probe.tmp.mjs`), в production коде debug
+логирования не осталось.
+
+### Candidate boundary (кратко)
+
+```text
+bin:   polygon tree
+parts: [{ id, polygontree, quantity?, sheet? }]
+```
+
+`exact` — derived (не входит в canonical input); `id/source/rotation` — GA state.
+`deepnest.start` уже выполняет проекцию в эту форму, значит SVG parser может
+возвращать её без изменения алгоритма, а JSON adapter может создавать её
+напрямую (доказано synthetic тестом).
+
+### Next (рекомендуется)
+
+1. Спроектировать `nest(geometry)`/canonical adapter на основе этой формы,
+   **не меняя** алгоритм: SVG parser и новый adapter сходятся в одну точку —
+   payload перед `worker.postMessage`.
+2. Сначала закрыть открытые вопросы: depth>1, multiple sheets, units/winding.
+3. Только после этого DOM-independent core / удаление jsdom.

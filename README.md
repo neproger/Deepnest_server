@@ -17,6 +17,8 @@ See [docs/PROJECT_VISION.md](docs/PROJECT_VISION.md) for the target architecture
 
 See [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) for the chronological development journal and the current known-good baseline. Run `npm test` (core + native addon + HTTP server) or `npm run server` for a manual HTTP server.
 
+See [docs/GEOMETRY_PIPELINE.md](docs/GEOMETRY_PIPELINE.md) for the current SVG → polygon → worker geometry model and the candidate canonical-geometry boundary.
+
 ## Fork History
 
 This repo was forked from [deepnest-io](https://github.com/deepnest-io/Deepnest) in order to make Deepnest work on node, decoupled from the electron app, refer to the [example](server.mjs).
