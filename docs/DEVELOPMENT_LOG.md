@@ -343,6 +343,8 @@ Status: unresolved (CI for headless — отдельная задача).
 - `README.md` — разделы Run/Test/Desktop переписаны под headless, Electron-инструкции убраны;
 - `docs/DEVELOPMENT_LOG.md` — эта запись.
 
+Дополнительно (follow-up cleanup commit): удалены `.vscode/launch.json` (Electron debug config) и `main/readme.md` (SVGNest browser UI readme). Tracked files: 200 → 103.
+
 ### Verification
 
 ```bash
