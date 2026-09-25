@@ -401,6 +401,8 @@ POST /nest  -> 200 text/event-stream (контракт не менялся)
 существующего `nest()`, не меняя nesting algorithm/geometry pipeline и не
 удаляя legacy `POST /nest`.
 
+Job API commit: `e47e9a4`.
+
 ### Starting state
 
 - baseline: `b41fd0d`; cleanup: `d07ab1e`, follow-up `8e831ba`
