@@ -239,3 +239,150 @@ event: response -> keys: [ 'svg', 'data', 'status' ]
 3. Начать безопасную очистку legacy: после каждого удаления прогонять `npm test` (core + server).
 4. Кандидаты на удаление (проверять import-ы перед удалением): Electron (`main.js`, `main.test.js`, `robot.js`, `tests/index.spec.ts`, `playwright.config.ts`, UI-ассеты `main/index.html`/`style.css`/`img`/`font`, UI-only util `ractive/interact/svgpanzoom/filesaver/...`).
 5. Не трогать `server.mjs` роуты, пока HTTP contract не стабилизирован (см. PROJECT_VISION, этап 3).
+
+---
+
+## 2026-09-25 — Legacy cleanup (Electron/UI/demo removal)
+
+### Goal
+
+Удалить legacy desktop/UI/demo части репозитория, **не меняя поведение `/nest`**.
+HTTP baseline (см. предыдущую запись) — regression contract.
+
+### Starting state
+
+- baseline commit: `b41fd0d test: add headless core, native addon and HTTP server baselines`
+- `npm test` = 3/3 PASS
+- tracked files at baseline: 200
+
+### Tried
+
+Порядок: сначала фиксируем baseline коммитом, затем режем небольшими группами с прогоном `npm test` после каждой.
+
+#### 0. Commit baseline
+
+```bash
+git add README.md index.mjs package.json server.mjs docs/DEVELOPMENT_LOG.md tests/core tests/fixtures tests/server
+git commit -m "test: add headless core, native addon and HTTP server baselines"
+# -> b41fd0d ; npm test 3/3 PASS
+```
+
+#### 1. Electron runtime + UI test config
+
+Проверка references (`grep`): `main.js`/`main/preload.js` не требуются из core/server;
+`main.test.js`/`robot.js`/`tests/index.spec.ts`/`playwright.config.ts` — desktop Playwright только.
+
+Удалено: `main.js`, `main.test.js`, `robot.js`, `main/preload.js`, `tests/index.spec.ts`, `playwright.config.ts`.
+Также удалены desktop-only CI workflows `.github/workflows/{build,playwright,robot}.yml` (ссылались на удалённые файлы/electron-packager).
+`package.json`: `start` → `node server.mjs`, `main` → `index.node.mjs`, удалены `exec`/`test:ui`/`serve`/`build*`/`dist*`/`copy`/`clean-all`.
+
+Result: `npm test` 3/3 PASS; `npm start` поднял headless server.
+
+#### 2. Desktop/UI assets
+
+Удалено: `main/index.html`, `main/style.css`, `main/background.html`, `main/img/`, `main/font/`, `icons/`, `icon.ico`, `icon.icns`.
+
+Result: `npm test` 3/3 PASS.
+
+#### 3. Util candidates (по одному, с проверкой references)
+
+`grep` по `require/import` подтвердил: ни один не требуется из core/server.
+
+Удалено (UI-only / legacy unused): `ractive.js`, `interact.js`, `svgpanzoom.js`, `filesaver.js`, `json.js`, `hull.js`, `parallel.js`, `placementworker.js`, `eval.js`, `clippernode.js`, `domparser.js`.
+
+Оставлено (runtime dependency ядра): `clipper.js`, `d3-polygon.js`, `geometryutil.js`, `matrix.js`, `pathsegpolyfill.js`, `simplify.js`.
+
+Result: `npm test` 3/3 PASS.
+
+#### 4. Demo text/font + demo HTML
+
+`server.mjs`: удалены `GET /`, `GET /upload`, `GET /text`, `POST /nest/text`, `getFont`, Fontsource prefetch, `subscribeToSeverEvents`. Добавлен `GET /health`. `start()` больше не имеет `prefetchFonts`.
+
+Result: `POST /nest` не менялся; `npm test` 3/3 PASS; `npm start` + `GET /health` → 200.
+
+#### 5. npm dependencies
+
+Удалены: `electron`, `@electron/packager`, `@electron/rebuild`, `@electron/remote`, `@playwright/test`, `nodemon`, `shx`, `axios`, `graceful-fs`, `opentype.js`, `pathseg`; удалён блок `build` (electron-builder).
+
+`npm install` → `removed 296 packages, audited 155 packages`.
+
+Result: `npm test` 3/3 PASS.
+
+### Successful
+
+* Electron runtime полностью удалён из кода и зависимостей.
+* Desktop UI/assets и UI-only util удалены.
+* Demo `/text`, `/nest/text`, `/upload`, Fontsource, `opentype.js` удалены.
+* `npm start` запускает headless HTTP server (`GET /health` → 200, `POST /nest` работает).
+* `npm test` = core + native addon + HTTP server, 3/3 PASS без mocks.
+* Tracked files: 200 → 105.
+
+### Problems found
+
+#### Problem: что выглядело unused, но оказалось runtime dependency
+
+- `d3-polygon.js` — **нужен** (`background.js` использует `d3.polygonHull`). Legacy `hull.js` (Graham scan) удалён, но настоящий convex hull живёт в `d3-polygon.js` и в `deepnest.js`/`background.js`.
+- `pathseg` (npm) — **не использовался вообще**: `svgparser.js` использует vendored `main/util/pathsegpolyfill.js`, а не npm-пакет.
+- `sse.js` (npm) — после удаления demo HTML **стал неиспользуемым сервером** (сервер пишет SSE сам). Оставлен по явному указанию «не удалять пока», до этапа замены HTTP-обвязки.
+- `graceful-fs` — удалён как прямая зависимость, но остаётся в `node_modules` транзитивно через `fs-extra`.
+
+#### Problem: удаление `.github/workflows`
+
+Workflows ссылались на удалённые `main.test.js`/playwright-конфиг и на electron-packager. Удалены целиком; headless CI пока не добавлен.
+
+Status: unresolved (CI for headless — отдельная задача).
+
+### Changes made
+
+- удалены 95 tracked-файлов (Electron/UI/assets/util/demo);
+- `server.mjs` — оставлены только `GET /health` и `POST /nest`; `start()` без font prefetch;
+- `package.json` — headless scripts (`start`/`server`/`test*`), `main` → `index.node.mjs`, очищены deps;
+- `package-lock.json` — пересчитан `npm install`;
+- `README.md` — разделы Run/Test/Desktop переписаны под headless, Electron-инструкции убраны;
+- `docs/DEVELOPMENT_LOG.md` — эта запись.
+
+### Verification
+
+```bash
+npm test
+```
+
+Results:
+
+* core (`tests/core/nest.test.mjs`): PASS
+* native addon (`tests/core/native-addon.test.mjs`): PASS
+* server (`tests/server/server.test.mjs`): PASS
+* итого: `# tests 3 / # pass 3 / # fail 0`
+
+Ручная проверка:
+
+```bash
+npm start
+# Server listening on http://localhost:8080
+GET /health -> 200 {"status":"ok"}
+GET /       -> 404 (demo HTML удалён)
+POST /nest  -> 200 text/event-stream (контракт не менялся)
+```
+
+Проверка зависимостей:
+
+```bash
+# в коде не осталось require/import удалённых пакетов
+# единственное упоминание — sse.js (оставлен осознанно)
+```
+
+### Current known-good baseline
+
+1. `npm install` собирает native addon (`build/Release/addon.node`).
+2. `npm test` — 3/3 PASS (core + native addon + HTTP server), ~1.2s.
+3. `npm start` / `npm run server` — headless HTTP server на `:8080`.
+4. `POST /nest` — тот же контракт, что до очистки (multipart SVG + `config`, SSE `connection`/`progress`/`response`).
+5. `GET /health` — новый простой health endpoint.
+6. Core-файлы: `index.mjs`, `index.node.mjs`, `main/{deepnest,background,svgparser,nestingToSVG,processPair,processPairs.node}.{js,mjs}`, `main/util/{clipper,d3-polygon,geometryutil,matrix,pathsegpolyfill,simplify}.js`, `src/**`, `binding.gyp`.
+
+### Next
+
+1. Отдельный этап: заменить demo-контракт `/nest`, ввести Job Manager и `/api/v1/jobs` (см. PROJECT_VISION, этапы 3–6).
+2. `sse.js` можно удалить одновременно с заменой HTTP-обвязки.
+3. Добавить headless CI (сборка addon + `npm test`).
+4. Не смешивать cleanup с behavioral refactoring (engine issues остаются в debt, см. PROJECT_VISION `Known Architectural Debt`).

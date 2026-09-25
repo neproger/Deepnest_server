@@ -1,9 +1,7 @@
 import busboy from "busboy";
 import express from "express";
-import { readFile, writeFile } from "fs/promises";
 import { buffer } from "node:stream/consumers";
-import { parse } from "opentype.js";
-import { fileURLToPath, pathToFileURL } from "url";
+import { pathToFileURL } from "url";
 import { nest } from "./index.node.mjs";
 
 export const app = express();
@@ -49,7 +47,6 @@ async function nestSSE(req, res) {
       },
       {
         bin: { width: 3000, height: 1000 },
-        // optimize material usage
         timeRatio: 0,
         units: "mm",
         spacing: 4,
@@ -77,137 +74,8 @@ async function nestSSE(req, res) {
   }
 }
 
-// https://github.com/mpetazzoni/sse.js
-function subscribeToSeverEvents(endPoint, data) {
-  const evtSource = new EventSource(endPoint, {
-    withCredentials: true,
-    headers: {
-      // Do not set content-type, leaving it for the browser to fill in the `multipart/form-data; boundary=....`
-    },
-    payload: data,
-  });
-  const progressbar = document.getElementById("nesting-progress");
-  const progressLabel = document.querySelector("label[for='nesting-progress']");
-  const stopButton = document.getElementById("stop");
-  const stats = document.getElementById("stats");
-  const container = document.getElementById("container");
-  const json = document.getElementById("json");
-  stopButton.addEventListener("click", () => evtSource.close());
-  evtSource.addEventListener("open", () => {
-    stats.innerHTML = "";
-    container.innerHTML = "";
-    json.innerHTML = "";
-    progressbar.setAttribute("value", 50);
-    progressLabel.innerHTML = "Connecting";
-  });
-  evtSource.addEventListener("connection", () => {
-    progressbar.setAttribute("value", 100);
-  });
-  evtSource.addEventListener("progress", (ev) => {
-    const { progress, phase } = JSON.parse(ev.data);
-    progressbar.setAttribute("value", progress);
-    progressLabel.innerHTML = phase;
-  });
-  evtSource.addEventListener("response", (ev) => {
-    const { svg, data, status } = JSON.parse(ev.data);
-    if (!status.better) {
-      return;
-    }
-    container.innerHTML = svg;
-    const { width, height } = container
-      .querySelector("svg > g")
-      .getBoundingClientRect();
-    stats.innerHTML = `${status.placed}/${status.total} taking ${Math.ceil(
-      width
-    )}*${Math.ceil(height)}px = ${Math.ceil(width * height)}px`;
-    json.innerHTML = JSON.stringify(data, null, 2);
-  });
-  evtSource.addEventListener("error", () => {
-    progressLabel.innerHTML = "ERROR";
-  });
-  return () => evtSource.close();
-}
-
-async function getFont({
-  font,
-  subset = "latin",
-  weight = 400,
-  style = "normal",
-}) {
-  /**
-   * @type FontResponse
-   */
-  const fontData = await (
-    await fetch(`https://api.fontsource.org/v1/fonts/${font}`, {
-      cache: "force-cache",
-    })
-  ).json();
-  const fontWeight = fontData.weights.includes(weight)
-    ? weight
-    : fontData.weights[0];
-  const fontStyle = fontData.styles.includes(style)
-    ? style
-    : fontData.styles[0];
-  const fontSubset = fontData.subsets.includes(subset)
-    ? subset
-    : fontData.defSubset;
-  const data = fontData.variants[fontWeight][fontStyle][fontSubset].url;
-  // opentype.js doesn't support woff2, use fontToStream if in need
-  const url = data.ttf;
-
-  if (!url) {
-    throw new Error("NOT FOUND");
-  }
-
-  const response = await fetch(url);
-  return parse(await response.arrayBuffer());
-}
-
-app.get("/", (req, res) => {
-  res.contentType("text/html");
-  res.send(`
-    <h1>Nesting App</h1>
-    <div><a href="/text">Nest Text</a></div>
-    <div><a href="/upload">Nest SVG Files</a> (supports only polys and paths)</div>
-    `);
-});
-
-app.get("/upload", async (req, res) => {
-  function subscribeToFileInput() {
-    const config = { units: "mm", spacing: 4 };
-    let disposer;
-    document.getElementById("upload").addEventListener("change", async (e) => {
-      const formData = new FormData();
-      formData.append("config", JSON.stringify(config));
-      const files = e.target.files;
-      for (let i = 0; i < files.length; i++) {
-        formData.append(files[i].name, files[i]);
-      }
-      disposer?.();
-      disposer = files.length
-        ? subscribeToSeverEvents("/nest", formData)
-        : undefined;
-    });
-  }
-
-  res.contentType("text/html");
-  res.end(`
-    <script type="module">${(
-      await readFile(fileURLToPath(import.meta.resolve("sse.js")))
-    ).toString()}
-    EventSource = SSE;
-    ${subscribeToSeverEvents.toString()}
-    ${subscribeToFileInput.toString()}
-    subscribeToFileInput();
-    </script>
-    <input id="upload" type="file" accept="image/svg+xml" multiple />
-    <button id="stop">stop</button>
-    <label for="nesting-progress"></label>
-    <progress id="nesting-progress" value="0" max="100"></progress>
-    <div id="stats"></div>
-    <div id="container"></div>
-    <pre id="json"></pre>
-    `);
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 app.post(
@@ -227,75 +95,6 @@ app.post(
   nestSSE
 );
 
-app.get("/text", async (req, res) => {
-  /**
-   * @type FontBasicResponse[]
-   */
-  const fonts = JSON.parse((await readFile("./fonts")).toString());
-
-  function subscribeToFormSubmission() {
-    const config = { units: "mm", spacing: 4 };
-    let disposer;
-    document.getElementById("form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      formData.append("config", JSON.stringify(config));
-      disposer?.();
-      disposer = subscribeToSeverEvents("/nest/text", formData);
-    });
-  }
-  res.contentType("text/html");
-  res.end(`
-    <script type="module">${(
-      await readFile(fileURLToPath(import.meta.resolve("sse.js")))
-    ).toString()}
-    EventSource = SSE;
-    ${subscribeToSeverEvents.toString()}
-    ${subscribeToFormSubmission.toString()}
-    subscribeToFormSubmission();
-    </script>
-    <div>
-      <form id="form" style="display: inline">
-        <input name="text" type="text" value="abcdefghijlmnopqrstuvwxyz" placeholder="Text to nest" />
-        <select name="font">${fonts.map(
-          (font) => `<option value="${font.id}">${font.family}</option>`
-        )}</select>
-        <input type="submit" />
-      </form>
-      <button id="stop">stop</button>
-    </div>
-    <div>
-    <label for="nesting-progress"></label>
-    <progress id="nesting-progress" value="0" max="100"></progress>
-    </div>
-    <div id="stats"></div>
-    <div id="container"></div>
-    <pre id="json"></pre>
-    `);
-});
-
-app.post(
-  "/nest/text",
-  parseForm,
-  async (req, res, next) => {
-    const { text, font, subset, weight, style, size, config } = req.fields;
-    const path = (await getFont({ font, subset, weight, style })).getPath(
-      text,
-      0,
-      0,
-      size
-    );
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.appendChild(path.toDOMElement());
-    req.nest = {
-      data: [new XMLSerializer().serializeToString(svg)],
-      config: config ? JSON.parse(config) : {},
-    };
-    next();
-  },
-  nestSSE
-);
-
 /**
  * Start the existing HTTP server.
  *
@@ -303,29 +102,10 @@ app.post(
  * can boot the real server on an ephemeral port. The HTTP contract (routes,
  * request/response formats) is unchanged.
  *
- * @param {{ port?: number, host?: string, prefetchFonts?: boolean }} [options]
+ * @param {{ port?: number, host?: string }} [options]
  * @returns {Promise<import("http").Server>}
  */
-export async function start({ port = PORT, host, prefetchFonts = true } = {}) {
-  // The demo `/text` routes need a local list of Fontsource fonts. Fetching it
-  // is best-effort: an offline machine must still be able to run `/nest`.
-  if (prefetchFonts) {
-    try {
-      /**
-       * @type FontBasicResponse[]
-       */
-      const fonts = await (
-        await fetch("https://api.fontsource.org/v1/fonts", { cache: "force-cache" })
-      ).json();
-      await writeFile("./fonts", JSON.stringify(fonts, null, 2));
-    } catch (error) {
-      console.warn(
-        "Font prefetch failed (offline?), /text may be unavailable:",
-        error.message
-      );
-    }
-  }
-
+export async function start({ port = PORT, host } = {}) {
   return await new Promise((resolve) => {
     const onListen = () => {
       console.log("Server listening on", `http://${host || "localhost"}:${port}`);
