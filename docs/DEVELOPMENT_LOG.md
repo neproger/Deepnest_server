@@ -832,3 +832,139 @@ parts: [{ id, polygontree, quantity?, sheet? }]
    payload перед `worker.postMessage`.
 2. Сначала закрыть открытые вопросы: depth>1, multiple sheets, units/winding.
 3. Только после этого DOM-independent core / удаление jsdom.
+
+---
+
+## 2026-09-25 — Canonical Geometry boundary
+
+### Goal
+
+Сделать существующий plain polygon tree официальной внутренней Canonical
+Geometry boundary, **не меняя** nesting algorithm. SVG становится одним из
+adapters; появляется DOM-independent engine entry `nestGeometry()`.
+
+### Выбранная canonical schema
+
+```js
+{
+  units?: "mm",                                  // metadata, math unit-agnostic
+  sheets: [ { id, quantity?, polygontree } ],    // `bin` — синоним одного sheet
+  parts:  [ { id, quantity?, polygontree } ]
+}
+```
+
+`polygontree` = массив `{x,y}` с вложенными `children` (holes).
+
+### Почему polygonal
+
+Curves полностью polygonized в SVG adapter (`polygonifyPath`/`polygonify`,
+`curveTolerance`); ниже parser'а line/arc/bezier не существуют. Core видит
+только точки. Поэтому canonical — polygonal, без line/arc/bezier schema.
+
+### Сознательно исключено из canonical
+
+- `exact` — engine-derived (добавляется `simplifyPolygon`, нужен `mergedLength`);
+- `source`, engine `id`, `rotation`, `parent`, GA/NFP state — runtime engine;
+- `svgelements`, `bounds`, `area`, DOM references — rendering/import metadata
+  (остаются в adapter-owned `renderContext`);
+- `filename` — adapter/application metadata (в engine передаётся как
+  pass-through носитель `id`).
+
+### Units contract
+
+Canonical coordinates — arbitrary but consistent unit. `spacing`,
+`curveTolerance`, sheet dimensions выражены в этом же unit. `units` — только
+метаданные; nesting mathematics не зависит от строки `"mm"`. SVG adapter
+конвертирует SVG units/scale в canonical (в `nest()` делается
+`spacing * ratio * scale`); будущие CAD adapters делают это сами.
+
+### Winding
+
+Поведение не менялось. Import решает outer/hole по containment (`toTree`), а
+clipper/native разворачивают полигоны по знаку площади
+(`nfpToClipperCoordinates`). Валидация winding не добавлена; regression-тест
+`outer + hole → canonical → successful nesting` есть (`holes` и canonical hole
+тесты). Остаётся открытым вопросом, нужна ли winding-конвенция в canonical.
+
+### depth > 1 limitation
+
+Структура поддерживает arbitrary depth (`toTree` рекурсивен), NFP использует
+только прямые `children`. Зафиксировано: semantics гарантированы для outer +
+direct hole children; глубже — representable, но не гарантировано. Не
+исправлялось.
+
+### Sheet semantics
+
+Canonical моделирует `sheets: [...]` (не заперт на один bin). Текущий SVG
+adapter выдаёт один sheet (`sheet-0`), engine по-прежнему открывает sheets из
+`deepNest.parts[].sheet`. Multiple sheet instances структурно поддержаны
+engine, но не проверены; `sheetId` во внешнем API пока всегда `bin.id`.
+
+### Что сделано
+
+- `src/geometry/canonical.mjs` — validate/normalize/clone canonical geometry;
+  `GeometryValidationError` (`INVALID_GEOMETRY`); без SVG/DOM/HTTP.
+- `src/geometry/engine.mjs` — `nestGeometry(geometry, callback, options)` и
+  внутренний `nestWithRender(...)`; переносит worker/event wiring из `index.mjs`;
+  НЕ импортирует svgparser/nestingToSVG.
+- `src/geometry/svg-adapter.mjs` — `parseSvgInput()` → `{ geometry, renderContext }`;
+  svgparser/jsdom не изменялись.
+- `index.mjs` — тонкий composer `SVG → canonical → nestWithRender` c
+  injected `nestingToSVG`; публичное поведение и `/api/v1` не менялись.
+- `main/deepnest.js` — `svgparser` теперь `require`-ится лениво (движок
+  импортируется и работает без DOM globals). Алгоритм не тронут.
+- `docs/GEOMETRY_PIPELINE.md` — раздел «Implemented Canonical Boundary».
+
+### Обнаруженные проблемы
+
+#### Problem: engine нельзя было импортировать без DOM
+
+Observed: `require('./main/deepnest.js')` без globals → `ReferenceError: window is not defined` (svgparser eagerly грузит `pathsegpolyfill`).
+
+Resolution: lazy `require('./svgparser')` в `deepnest.js`. Status: fixed.
+`node -e "require('./main/deepnest.js')"` без globals теперь работает.
+
+#### Problem: engine мутирует polygontree (offsetTree)
+
+Observed: `deepnest.start()` меняет `parts[i].polygontree` in place; передача
+canonical-объекта напрямую мутировала бы вход.
+
+Resolution: `clonePolygonTree` перед передачей в engine; тест «does not mutate
+caller input». Status: fixed.
+
+#### Problem: renderer привязан к DOM, а canonical должен быть чистым
+
+Observed: `nestingToSVG` нужны `svgelements`/`bounds` из import.
+
+Resolution: `renderContext` отделён от canonical и передаётся только SVG-путём
+через `nestWithRender`; `nestGeometry` его не знает. Status: handled.
+
+### Verification
+
+```bash
+node --test tests/core/canonical.test.mjs   # 7/7 PASS, без DOM (проверяется typeof window === "undefined")
+node --test tests/core/geometry.test.mjs    # 4/4 PASS (включая SVG→canonical parity)
+npm test                                    # 24/24 PASS
+```
+
+Тесты добавлены: canonical nest без DOM; holes; quantity; `bin`-alias;
+invalid canonical (empty/NaN/quantity/no parts/no sheet); clone без metadata;
+SVG→canonical→engine parity.
+
+### Production behavior
+
+Не менялось: тот же `/api/v1`, тот же SVG request, тот же nesting algorithm,
+тот же callback/progress/abort contract. Единственное внутреннее изменение —
+lazy svgparser в `deepnest.js` и явная canonical-проекция.
+
+### Commit
+
+См. hash в записи ниже (этот этап).
+
+### Next
+
+1. Public JSON geometry adapter (`format: "geometry"`) поверх проверенной
+   canonical boundary — отдельный этап.
+2. Закрыть открытые вопросы: winding convention, depth>1 policy, multiple
+   sheets (`sheetId`), ownership of units in future adapters.
+3. `jsdom` не удалять: SVG adapter и renderer пока на нём (и это допустимо).

@@ -241,6 +241,62 @@ and the placements. It clones the original DOM nodes and applies the placement
 transform. It can be understood as `Canonical Geometry + placements → SVG`, but
 today it is coupled to the originally imported DOM nodes.
 
+## Implemented Canonical Boundary (2026-09-25)
+
+The candidate below is now the implemented internal boundary. The nesting
+algorithm was not changed; the existing plain polygon tree became explicit.
+
+```text
+SVG string ──> src/geometry/svg-adapter.mjs ──> Canonical Geometry
+                                                   │
+                              src/geometry/engine.mjs nestGeometry()
+                                                   │
+                                         existing Deepnest engine
+```
+
+- `src/geometry/canonical.mjs` — documents/validates/normalises canonical
+  geometry and deep-clones polygon trees. No SVG/DOM/HTTP.
+- `src/geometry/engine.mjs` — `nestGeometry(geometry, callback, options)`:
+  DOM-independent engine entry, same progress/result/abort semantics. Also
+  exports `nestWithRender(...)` used only by the SVG path. It does **not**
+  import the SVG parser or the SVG renderer.
+- `src/geometry/svg-adapter.mjs` — `parseSvgInput(svgInput, options)` returns
+  `{ geometry, renderContext }`. Uses `main/svgparser.js` and jsdom unchanged.
+  `renderContext` (DOM elements, bounds) is adapter-owned and never enters
+  canonical geometry.
+- `index.mjs nest()` — thin composer: `parseSvgInput` → `nestGeometry` (with
+  `nestingToSVG` injected as render function). Public callback/HTTP behaviour is
+  unchanged.
+- `main/deepnest.js` now `require`s `svgparser` lazily, so the engine is
+  importable and runnable without DOM globals.
+
+Implemented canonical shape:
+
+```js
+{
+  units?: "mm",                      // metadata only; math is unit-agnostic
+  sheets: [ { id, quantity?, polygontree } ],   // `bin` accepted as alias
+  parts:  [ { id, quantity?, polygontree } ]
+}
+```
+
+`exact`, `source`, `id`, `rotation` are engine-derived and **not** part of the
+input. `svgelements`/`bounds` stay in the adapter's `renderContext`.
+
+Limitations (unchanged, documented deliberately): current nesting semantics are
+guaranteed for outer polygons with **direct** hole children; deeper topology and
+multiple sheets are representable structurally but not guaranteed by the engine.
+
+### Current implementation vs new boundary
+
+- **Current implementation** (still in place): `main/svgparser.js` (DOM),
+  `DeepNest.getParts`/`importsvg`, polygon trees on `deepNest.parts`, worker
+  payload `individual.placement`, NFP/clipper/native/GA in `main/background.js`.
+- **New boundary**: the explicit canonical object exchanged between the SVG
+  adapter and `nestGeometry`; `nestGeometry` runs the same engine unchanged.
+- `main/nestingToSVG.mjs` remains DOM-coupled and is injected only on the SVG
+  path; canonical nesting works without it.
+
 ## Candidate Canonical Boundary
 
 From the analysis above:

@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 // Side-effect import: installs jsdom-backed DOM globals (DOMParser, window, ...).
 import "../../index.node.mjs";
 
+import { parseSvgInput } from "../../src/geometry/svg-adapter.mjs";
+import { nestGeometry } from "../../src/geometry/engine.mjs";
+
 const { DeepNest } = await import("../../main/deepnest.js");
 
 const fixtures = path.resolve(
@@ -146,4 +149,48 @@ test("engine accepts hand-built polygon trees without the SVG parser", async () 
   assert.equal(tree.children.length, 1, "synthetic hole preserved");
   assert.deepEqual(pointKeys(tree), ["exact", "x", "y"]);
   assert.equal(tree.filename, "synthetic");
+});
+
+test("SVG input flows through canonical geometry into the engine", async () => {
+  const binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
+  const partSvg = await readFile(path.resolve(fixtures, "part.svg"), "utf8");
+
+  const { geometry } = await parseSvgInput([{ file: "part-A", svg: partSvg }], {
+    bin: binSvg,
+    units: "mm",
+    scale: 72,
+    spacing: 0,
+  });
+
+  // Canonical geometry is DOM-free and carries only identity + polygon tree.
+  assert.equal(geometry.sheets.length, 1);
+  assert.equal(geometry.parts.length, 1);
+  assert.equal(geometry.parts[0].id, "part-A");
+  assert.equal(geometry.parts[0].quantity, 1);
+  assert.ok(!("svgelements" in geometry.parts[0]), "no DOM in canonical geometry");
+  assert.deepEqual(Object.keys(geometry.parts[0]).sort(), [
+    "id",
+    "polygontree",
+    "quantity",
+  ]);
+
+  const payload = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("parity nesting timed out")), 30_000);
+    nestGeometry(
+      geometry,
+      async (result) => {
+        if (!result.status.complete) return;
+        clearTimeout(timer);
+        await result.abort().catch(() => {});
+        resolve(result);
+      },
+      { units: "mm", scale: 72, spacing: 0 }
+    ).catch(reject);
+  });
+
+  assert.equal(payload.status.total, 1);
+  assert.equal(payload.result.length, 1);
+  assert.equal(payload.result[0].filename, "part-A");
+  assert.equal(typeof payload.result[0].x, "number");
+  assert.equal(typeof payload.result[0].rotation, "number");
 });

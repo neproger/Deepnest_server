@@ -6,7 +6,16 @@
 
 	'use strict';
 
-	const SvgParser = require('./svgparser');
+	// Loaded lazily: svgparser pulls in a browser SVGPathSeg polyfill that
+	// touches `window`, and the nesting engine must be importable without DOM
+	// globals when geometry is supplied directly (canonical geometry path).
+	var SvgParser = null;
+	function svgParser() {
+		if (!SvgParser) {
+			SvgParser = require('./svgparser');
+		}
+		return SvgParser;
+	}
 	const ClipperLib = require('./util/clipper');
 	const {GeometryUtil} = require('./util/geometryutil');
 	const {simplify} = require('./util/simplify')
@@ -62,8 +71,8 @@
 			// parse svg
 			// config.scale is the default scale, and may not be applied
 			// scalingFactor is an absolute scaling that must be applied regardless of input svg contents
-			var svg = SvgParser.load(dirpath, svgstring, config.scale, scalingFactor);
-			svg = SvgParser.clean(dxfFlag);
+			var svg = svgParser().load(dirpath, svgstring, config.scale, scalingFactor);
+			svg = svgParser().clean(dxfFlag);
 
 			if(filename){
 				this.imports.push({
@@ -530,7 +539,7 @@
 				config.scale = parseInt(c.scale);
 			}
 
-			SvgParser.config({ tolerance: config.curveTolerance, endpointTolerance: c.endpointTolerance});
+			svgParser().config({ tolerance: config.curveTolerance, endpointTolerance: c.endpointTolerance});
 			
 			best = null;
 			//nfpCache = {};
@@ -650,16 +659,16 @@
 			var numChildren = paths.length;
 			for(i=0; i<numChildren; i++){
 			
-				if(SvgParser.polygonElements.indexOf(paths[i].tagName) < 0){
+				if(svgParser().polygonElements.indexOf(paths[i].tagName) < 0){
 					continue;
 				}
 				
 				// don't use open paths
-				if(!SvgParser.isClosed(paths[i], 2*config.curveTolerance)){
+				if(!svgParser().isClosed(paths[i], 2*config.curveTolerance)){
 					continue;
 				}
 				
-				var poly = SvgParser.polygonify(paths[i]);
+				var poly = svgParser().polygonify(paths[i]);
 				poly = this.cleanPolygon(poly);
 
 				// todo: warn user if poly could not be processed and is excluded from the nest
@@ -847,7 +856,7 @@
 						
 						var transformString = el.getAttribute('transform')
 						if(transformString){
-							var transform = SvgParser.transformParse(transformString);
+							var transform = svgParser().transformParse(transformString);
 							if(transform){
 								var transformed = transform.calc(mid.x, mid.y);
 								mid.x = transformed[0];
@@ -864,7 +873,7 @@
 					else if(el.tagName == 'path' || el.tagName == 'polyline'){
 						var k;
 						if(el.tagName == 'path'){
-							var p = SvgParser.polygonifyPath(el);
+							var p = svgParser().polygonifyPath(el);
 						}
 						else{
 							var p = [];
