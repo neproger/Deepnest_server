@@ -11,6 +11,10 @@ Deepnest is a node application originally based on [SVGNest](https://github.com/
 - Support for DXF files (via conversion)
 - New path approximation feature for highly complex parts
 
+## Project Vision
+
+See [docs/PROJECT_VISION.md](docs/PROJECT_VISION.md) for the target architecture: turning this fork into a universal headless 2D nesting service with an HTTP Job API. It defines the project boundaries and the preferred order of development. Read it before making architectural changes.
+
 ## Fork History
 
 This repo was forked from [deepnest-io](https://github.com/deepnest-io/Deepnest) in order to make Deepnest work on node, decoupled from the electron app, refer to the [example](server.mjs).
