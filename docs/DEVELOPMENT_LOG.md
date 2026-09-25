@@ -959,7 +959,7 @@ lazy svgparser в `deepnest.js` и явная canonical-проекция.
 
 ### Commit
 
-См. hash в записи ниже (этот этап).
+`2a4e1f1 refactor: introduce canonical geometry boundary and DOM-independent nestGeometry`.
 
 ### Next
 
