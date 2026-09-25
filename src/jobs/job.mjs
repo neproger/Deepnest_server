@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { adaptInput, toExternalResult } from "./input.mjs";
+import { adaptInput, buildSheetMap, toExternalResult } from "./input.mjs";
 import { nestWithRender } from "../geometry/engine.mjs";
 
 const TERMINAL = new Set(["stopped", "completed", "failed"]);
@@ -21,6 +21,7 @@ export class Job {
     this.manager = manager;
     this.spec = spec;
     this.binId = spec.sheetId;
+    this.sheetMap = null;
 
     this.status = "queued";
     this.createdAt = new Date().toISOString();
@@ -80,6 +81,7 @@ export class Job {
         this.spec
       );
       this.svgAvailable = Boolean(renderContext);
+      this.sheetMap = buildSheetMap(geometry.sheets);
       this.abort = await nestWithRender(
         geometry,
         renderContext,
@@ -87,6 +89,7 @@ export class Job {
         {
           ...engineOptions,
           progressCallback: (progress) => this.onProgress(progress),
+          onError: (error) => this.fail(error),
         }
       );
     } catch (error) {
@@ -125,7 +128,7 @@ export class Job {
     }
     this.rawResult = data;
     this.svgFn = svg;
-    this.result = toExternalResult(data, status, this.binId);
+    this.result = toExternalResult(data, status, this.sheetMap);
     this.placementComplete = !!status.complete;
     this.resultUpdatedAt = new Date().toISOString();
     this.emit("result.updated", {
@@ -191,6 +194,13 @@ export class Job {
       code: error?.code || "ENGINE_ERROR",
       message: error?.message || String(error),
     };
+    const abort = this.abort;
+    this.abort = null;
+    if (abort) {
+      Promise.resolve()
+        .then(() => abort())
+        .catch(() => {});
+    }
     this.emit("job.failed", { jobId: this.id, error: this.error });
     this.manager.onJobFinished(this);
   }

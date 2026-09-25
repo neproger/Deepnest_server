@@ -42,6 +42,7 @@ export function resolveEngineConfig(options = {}) {
   const {
     timeout = 0,
     progressCallback,
+    onError,
     units = "inch",
     scale = 72,
     spacing = 0,
@@ -55,7 +56,7 @@ export function resolveEngineConfig(options = {}) {
     scale,
     spacing,
   };
-  return { deepNestConfig, timeout, progressCallback };
+  return { deepNestConfig, timeout, progressCallback, onError };
 }
 
 /**
@@ -79,7 +80,8 @@ export async function nestWithRender(geometry, renderContext, callback, options 
 
 async function run(geometry, renderContext, callback, options) {
   const normalized = normalizeGeometry(geometry);
-  const { deepNestConfig, timeout, progressCallback } = resolveEngineConfig(options);
+  const { deepNestConfig, timeout, progressCallback, onError } =
+    resolveEngineConfig(options);
 
   const eventEmitter = new EventTarget();
   const deepNest = new DeepNest(eventEmitter, deepNestConfig);
@@ -112,6 +114,8 @@ async function run(geometry, renderContext, callback, options) {
 
   const total = normalized.parts.reduce((sum, part) => sum + part.quantity, 0);
 
+  let timer = 0;
+  let aborted = false;
   const worker = new Worker(new URL("../../main/background.js", import.meta.url));
   eventEmitter.addEventListener("background-start", ({ detail }) =>
     worker.postMessage(detail)
@@ -119,13 +123,26 @@ async function run(geometry, renderContext, callback, options) {
   worker.on("message", ({ type, data }) =>
     eventEmitter.dispatchEvent(new CustomEvent(type, { detail: data }))
   );
+  // Engine/worker failures (e.g. sheet exhaustion inside placeParts) must fail
+  // the job instead of crashing the process as an unhandled worker "error".
+  // Also stop the main-thread worker timer so the process can exit.
+  worker.on("error", (error) => {
+    clearTimeout(timer);
+    deepNest.stop();
+    onError?.(error);
+  });
+  worker.on("exit", (code) => {
+    if (!aborted && code !== 0) {
+      clearTimeout(timer);
+      deepNest.stop();
+      onError?.(new Error(`nesting worker exited with code ${code}`));
+    }
+  });
 
   eventEmitter.addEventListener("background-progress", ({ detail }) => {
     detail.progress >= 0 && progressCallback?.(detail);
   });
 
-  let timer = 0;
-  let aborted = false;
   const abort = async () => {
     if (aborted) {
       return;

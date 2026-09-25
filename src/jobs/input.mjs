@@ -255,6 +255,7 @@ export async function adaptInput(spec) {
     bin,
     units,
     scale,
+    sheetId: spec.sheetId,
   });
   // Renderer is SVG-specific and loaded only on this path.
   const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
@@ -264,42 +265,64 @@ export async function adaptInput(spec) {
 }
 
 /**
+ * Map internal sheet identity to stable external identity.
+ *
+ * NOTE: the engine reuses the same polygon object for `quantity > 1` copies of
+ * one sheet geometry and overwrites its `id`, so the raw `sheetid` is not a
+ * reliable instance counter. We therefore derive `sheetInstanceId` from the
+ * order in which the engine opens sheet instances (per sheet type).
+ */
+export function buildSheetMap(sheets) {
+  return sheets.map((sheet) => ({ id: sheet.id, quantity: sheet.quantity }));
+}
+
+/**
  * Convert the engine result to the stable external result contract.
  *
- * `instanceId` is derived from the engine's globally unique nested-instance
- * `id`, so it stays stable across successive best-result updates for a job.
+ * `instanceId`/`sheetInstanceId` are derived from engine order, so they stay
+ * stable across successive best-result updates.
  */
-export function toExternalResult(data, status, sheetId) {
-  const flat = data.placements
-    .flatMap((sheet) => sheet.sheetplacements)
-    .slice()
-    .sort((a, b) => a.id - b.id);
-
+export function toExternalResult(data, status, sheetMap) {
   const counters = new Map();
-  const placements = flat.map((placement) => {
-    const partId = placement.filename;
-    const instanceId = counters.get(partId) ?? 0;
-    counters.set(partId, instanceId + 1);
-    return {
-      partId,
-      instanceId,
-      sheetId,
-      x: placement.x,
-      y: placement.y,
-      rotation: placement.rotation,
-      ...(placement.mergedLength !== undefined && {
-        mergedLength: placement.mergedLength,
-      }),
-      ...(placement.mergedSegments !== undefined && {
-        mergedSegments: placement.mergedSegments,
-      }),
-      raw: {
-        id: placement.id,
-        source: placement.source,
-        filename: placement.filename,
-      },
-    };
-  });
+  const sheetInstanceCounters = new Map();
+  const placements = [];
+
+  for (const group of data.placements) {
+    const sheet = sheetMap ? sheetMap[group.sheet] : undefined;
+    const sheetId = sheet ? sheet.id : String(group.sheet);
+    const sheetInstanceId = sheetInstanceCounters.get(group.sheet) ?? 0;
+    sheetInstanceCounters.set(group.sheet, sheetInstanceId + 1);
+
+    for (const placement of group.sheetplacements
+      .slice()
+      .sort((a, b) => a.id - b.id)) {
+      const partId = placement.filename;
+      const instanceId = counters.get(partId) ?? 0;
+      counters.set(partId, instanceId + 1);
+      placements.push({
+        partId,
+        instanceId,
+        sheetId,
+        sheetInstanceId,
+        x: placement.x,
+        y: placement.y,
+        rotation: placement.rotation,
+        ...(placement.mergedLength !== undefined && {
+          mergedLength: placement.mergedLength,
+        }),
+        ...(placement.mergedSegments !== undefined && {
+          mergedSegments: placement.mergedSegments,
+        }),
+        raw: {
+          id: placement.id,
+          source: placement.source,
+          filename: placement.filename,
+          sheet: group.sheet,
+          sheetid: group.sheetid,
+        },
+      });
+    }
+  }
 
   return {
     fitness: data.fitness,

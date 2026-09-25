@@ -56,7 +56,7 @@ export async function parseSvgInput(svgInput, options = {}) {
     throw new Error("Nothing to nest");
   }
 
-  const sheetId = "sheet-0";
+  const sheetId = options.sheetId ?? "sheet-0";
   const entries = [];
   const parts = [];
 

@@ -329,6 +329,77 @@ source SVG, so `GET /result.svg` returns `RESULT_FORMAT_UNAVAILABLE`; structured
 `GET /result` works identically. The public geometry contract accepts exactly
 one sheet for now (multi-sheet identity is not guaranteed yet).
 
+## Contracts (investigated 2026-09-25)
+
+### Topology contract
+
+- Topology (outer vs hole) is defined by the **tree structure** (`children`),
+  not by winding. At SVG import, containment (`toTree` + `Clipper.PointInPolygon`)
+  decides it; for canonical input, `children` are taken as given.
+- Guaranteed: an outer polygon with **direct** hole children.
+- Representable but not guaranteed: deeper nesting (`children` of holes /
+  islands). NFP consumes only direct `children`.
+- Winding is **not** used for topology discovery and must not be.
+
+### Winding contract
+
+The engine is **orientation-agnostic**; no normalization is required.
+
+Evidence (real engine + native addon + clipper, see `tests/core/winding.test.mjs`):
+
+- `GeometryUtil.polygonArea` convention: CCW is positive, CW is negative.
+- Native `calculateNFP({A,B})` with `A` = outer+hole produces byte-identical
+  results for all four outer/hole winding combinations (same polygon, same area,
+  same `children` count).
+- JS `Clipper.MinkowskiSum` output is identical for CW and CCW outer polygons.
+- Full engine nests all four outer/hole combinations successfully.
+- Sheet orientation (CW or CCW) does not affect nesting.
+- A hole changes the NFP regardless of its winding (holes are honored via
+  `children`).
+
+Internal note: NFP polygons returned by the engine are normalized before being
+handed to Clipper (`nfpToClipperCoordinates` reverses by signed area), which is
+why user winding is irrelevant. Canonical input therefore defines **no winding
+invariant**; clients may send either orientation.
+
+### Sheet identity contract
+
+Internal engine fields:
+
+- `sheet` — index into the worker payload parts list (= canonical sheet entry).
+- `sheetid` — per-sheet global instance counter.
+- Both are exposed only in `placement.raw`.
+
+Observed engine behavior (see `tests/core/sheets.test.mjs`):
+
+- The engine consumes provided sheet instances **in order** (`_sheets.shift()`
+  in `placeParts`).
+- It uses multiple different sheet geometries correctly (each opened sheet
+  carries its own `sheet.source`).
+- **Bug:** for `quantity > 1` of one sheet geometry, the same polygon object is
+  reused for the copies and the engine overwrites `id`, so raw `sheetid`
+  collides. It is therefore **not** a reliable instance identifier.
+- **Bug:** if all provided sheets are consumed while parts remain, `placeParts`
+  calls `polygonArea(undefined)` and the worker throws. This used to crash the
+  process; the engine entry now attaches a worker `error` listener, so the job
+  fails with `ENGINE_ERROR` instead. No new sheets are created automatically.
+
+External (public) identity, derived in the application boundary:
+
+```json
+{ "partId": "...", "instanceId": 0, "sheetId": "sheet-A", "sheetInstanceId": 1, "x": 0, "y": 0, "rotation": 0 }
+```
+
+- `sheetId` — client sheet id from canonical `sheets[i].id`.
+- `sheetInstanceId` — derived from the **order** in which the engine opens sheet
+  instances of that sheet type (not from the unreliable raw `sheetid`).
+
+Multiple sheets: structurally supported by canonical geometry and usable by the
+engine **only when enough instances are provided**. Because exhaustion is
+unrecoverable and identity for identical-geometry copies is broken, the public
+HTTP geometry contract currently accepts exactly one sheet. The SVG path still
+represents a single bin.
+
 ## Candidate Canonical Boundary
 
 From the analysis above:

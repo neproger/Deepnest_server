@@ -536,6 +536,7 @@ test("geometry input: stable ids, quantity, holes and structured result", async 
     assert.equal(typeof placement.y, "number");
     assert.equal(typeof placement.rotation, "number");
     assert.ok(Number.isInteger(placement.instanceId));
+    assert.equal(placement.sheetInstanceId, 0);
   }
 
   await waitFor(
@@ -703,4 +704,55 @@ test("geometry input: rejects invalid geometry and structure", async () => {
   });
   assert.equal(multiSheet.status, 400);
   assert.equal(multiSheet.json.error.code, "INVALID_GEOMETRY");
+});
+
+test("geometry input: sheet exhaustion fails the job without killing the server", async () => {
+  const tight = {
+    id: "tight",
+    quantity: 1,
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 120, y: 0 },
+        { x: 120, y: 60 },
+        { x: 0, y: 60 },
+      ],
+      children: [],
+    },
+  };
+  const block = {
+    id: "big",
+    quantity: 2,
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 115, y: 0 },
+        { x: 115, y: 55 },
+        { x: 0, y: 55 },
+      ],
+      children: [],
+    },
+  };
+
+  const created = await createJob({
+    input: { format: "geometry", units: "mm", sheets: [tight], parts: [block] },
+    config: { spacing: 0, timeRatio: 0 },
+  });
+  assert.equal(created.status, 202);
+  const id = created.json.jobId;
+
+  const failed = await waitFor(
+    async () => {
+      const snapshot = (await getJson(`/api/v1/jobs/${id}`)).json;
+      return snapshot?.status === "failed" ? snapshot : null;
+    },
+    { timeout: 20_000, message: "job did not fail on sheet exhaustion" }
+  );
+  assert.equal(failed.error.code, "ENGINE_ERROR");
+
+  // The server must still be alive and serving.
+  const health = await fetch(`${base}/health`);
+  assert.equal(health.status, 200);
+
+  await deleteJob(id);
 });

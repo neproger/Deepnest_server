@@ -160,8 +160,10 @@ Notes on `format: "geometry"`:
 
 - Coordinates may use any unit, but they must be consistent; `spacing` and
   `curveTolerance` use the same unit. `units` is metadata only.
-- Exactly one sheet is accepted for now (identity for multiple sheets is not
-  guaranteed yet).
+- Exactly one sheet is accepted for now. The engine can consume multiple
+  provided sheet instances, but if they run out while parts remain it fails the
+  job (`ENGINE_ERROR`); instance identity for `quantity > 1` of one sheet is also
+  not reliable yet.
 - `GET /result.svg` is unavailable and returns
   `400 {"error":{"code":"RESULT_FORMAT_UNAVAILABLE",...}}`. `GET /result` still
   works.
@@ -195,7 +197,8 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/jobs/<id>/stop
 curl -s -X DELETE http://127.0.0.1:8080/api/v1/jobs/<id>
 ```
 
-Placements use the client's own ids: `{ partId, instanceId, sheetId, x, y, rotation }`.
+Placements use the client's own ids:
+`{ partId, instanceId, sheetId, sheetInstanceId, x, y, rotation }`.
 `placementComplete` means every part is placed in the current best result; it is
 independent of `job.status === "completed"` (the genetic search may keep
 improving until stopped or `execution.timeLimitMs` elapses). Lifecycle:

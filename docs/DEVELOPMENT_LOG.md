@@ -1087,3 +1087,103 @@ npm test   # 27/27 PASS
 проявились после второго независимого input adapter: winding, multiple sheets,
 topology depth, result rendering (geometry→SVG), CLI, native ABI. По фактической
 боли выбрать следующий этап.
+
+---
+
+## 2026-09-25 — Geometry semantics: winding + sheet identity
+
+### Goal
+
+Стабилизировать семантику Canonical/Public Geometry: точно установить winding
+требования и фактическую поддержку multiple sheets. Nesting algorithm не менять.
+
+### Winding: результат исследования
+
+Проведены runtime-эксперименты (native addon, JS Clipper, полный engine):
+
+- `GeometryUtil.polygonArea`: CCW > 0, CW < 0.
+- `calculateNFP({A,B})` (A = outer + direct hole) даёт **идентичный** результат
+  для всех 4 комбинаций outer/hole winding (same polygon/area/children).
+- JS `Clipper.MinkowskiSum` идентичен для outer CW и CCW.
+- Полный engine размещает все 4 комбинации (`complete=true`).
+- Sheet CW/CCW не влияет.
+- Hole меняет NFP независимо от winding → holes учитываются через `children`.
+
+Вывод: **Вариант A — engine orientation-agnostic**. Canonical winding invariant
+не нужен, нормализация не добавляется. Topology определяется только `children`
+(не winding). Внутри engine NFP нормализуется перед Clipper
+(`nfpToClipperCoordinates` reverse по знаку площади) — поэтому input winding
+неважен.
+
+Зафиксировано тестами `tests/core/winding.test.mjs` (6 тестов).
+
+### Multiple sheets: результат исследования
+
+Прослежен путь canonical sheets → `deepNest.parts` → payload → `placeParts` →
+`placements[].sheet/sheetid`.
+
+Установлено:
+
+- Engine **потребляет** несколько переданных sheet-инстансов по порядку
+  (`_sheets.shift()`); разные sheet geometries различаются по `sheet.source`.
+- **Bug 1:** при `quantity > 1` одной sheet geometry engine переиспользует один
+  и тот же polygon-объект для копий и перезаписывает `id`, поэтому сырой
+  `sheetid` **коллизирует** (наблюдали `[1,1]` вместо `[0,1]`). Не является
+  надёжным instance id.
+- **Bug 2:** если все переданные sheets израсходованы, а детали остались,
+  `placeParts` вызывает `polygonArea(undefined)` → worker бросает исключение.
+  Ранее это **ронял весь процесс** (unhandled worker `error`). Новые sheets
+  автоматически не открываются.
+- **Bug 3 (побочный):** после worker-ошибки главный поток оставлял живым
+  `workerTimer` (`setInterval` из `deepNest.start()`), из-за чего процесс не
+  завершался.
+
+Решения (без изменения алгоритма):
+
+- `src/geometry/engine.mjs`: навешен `worker.on("error"/"exit")` → `onError`,
+  а также `clearTimeout(timer)` + `deepNest.stop()` — job падает с
+  `ENGINE_ERROR`, процесс не падает, таймеры не текут.
+- `Job` прокидывает `onError` и делает cleanup abort в `fail()`.
+- Внешняя identity (`toExternalResult`): `sheetId` = canonical `sheets[i].id`;
+  `sheetInstanceId` вычисляется по **порядку** открытия sheet-инстансов данного
+  типа (а не по ненадёжному `sheetid`). Добавлено поле `sheetInstanceId` в
+  placements; internal `sheet`/`sheetid` остаются в `raw`.
+
+### Решение по публичному API
+
+Multiple sheets НЕ открываем публично: engine не переживает исчерпание sheets и
+ломает identity для копий одной geometry. HTTP geometry по-прежнему требует
+ровно один sheet (`INVALID_GEOMETRY`). Ограничение доказано и задокументировано,
+а не замаскировано в application layer. SVG transport остаётся одним bin.
+
+### Tests
+
+- `tests/core/winding.test.mjs` (6): signed area; native NFP orientation-agnostic;
+  hole affects NFP; clipper orientation-agnostic; full engine все 4 комбинации;
+  sheet orientation.
+- `tests/core/sheets.test.mjs` (4): quantity>1 использует несколько инстансов;
+  разные sheet geometries различаются; sheet exhaustion → error (не crash);
+  engine восстанавливается после ошибки.
+- `tests/server/jobs.test.mjs`: `sheetInstanceId` в geometry result; sheet
+  exhaustion через HTTP → job `failed`/`ENGINE_ERROR`, сервер жив (`/health` 200).
+
+```bash
+npm test   # 38/38 PASS
+```
+
+### Documentation
+
+- `docs/GEOMETRY_PIPELINE.md`: разделы **Topology contract**, **Winding
+  contract**, **Sheet identity contract**.
+- `README.md`: `sheetInstanceId` в placements; уточнено ограничение по sheets.
+- `docs/DEVELOPMENT_LOG.md`: эта запись.
+
+### Commit
+
+Фиксируется отдельным commit этого этапа (hash добавляется следом).
+
+### Далее
+
+Выбирать по фактической боли. Открытые ограничения: multiple sheets (engine
+exhaustion + identity копий), depth>1 islands, result rendering для geometry,
+CLI, native ABI. Winding закрыт (не требует изменений).
