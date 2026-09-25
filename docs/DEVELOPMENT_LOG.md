@@ -1079,7 +1079,7 @@ npm test   # 27/27 PASS
 
 ### Commit
 
-Фиксируется отдельным commit этого этапа (hash добавляется следом).
+`01346f9 feat: add public format=geometry Job input via canonical boundary`.
 
 ### Далее
 
