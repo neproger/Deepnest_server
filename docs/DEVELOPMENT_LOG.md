@@ -249,6 +249,8 @@ event: response -> keys: [ 'svg', 'data', 'status' ]
 Удалить legacy desktop/UI/demo части репозитория, **не меняя поведение `/nest`**.
 HTTP baseline (см. предыдущую запись) — regression contract.
 
+Cleanup commit: `d07ab1e` (baseline commit: `b41fd0d`).
+
 ### Starting state
 
 - baseline commit: `b41fd0d test: add headless core, native addon and HTTP server baselines`
