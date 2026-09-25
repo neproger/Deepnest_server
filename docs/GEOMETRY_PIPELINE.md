@@ -379,10 +379,11 @@ Observed engine behavior (see `tests/core/sheets.test.mjs`):
 - **Bug:** for `quantity > 1` of one sheet geometry, the same polygon object is
   reused for the copies and the engine overwrites `id`, so raw `sheetid`
   collides. It is therefore **not** a reliable instance identifier.
-- **Bug:** if all provided sheets are consumed while parts remain, `placeParts`
-  calls `polygonArea(undefined)` and the worker throws. This used to crash the
-  process; the engine entry now attaches a worker `error` listener, so the job
-  fails with `ENGINE_ERROR` instead. No new sheets are created automatically.
+- **Fixed:** if all provided sheets are consumed while parts remain, `placeParts`
+  now stops and returns the remaining parts as `unplaced` (a valid partial
+  result) instead of calling `polygonArea(undefined)`. No new sheets are created
+  automatically. Worker `error`/`exit` are still guarded at the engine entry, so
+  any other engine failure fails the job instead of crashing the process.
 
 External (public) identity, derived in the application boundary:
 
@@ -393,12 +394,29 @@ External (public) identity, derived in the application boundary:
 - `sheetId` — client sheet id from canonical `sheets[i].id`.
 - `sheetInstanceId` — derived from the **order** in which the engine opens sheet
   instances of that sheet type (not from the unreliable raw `sheetid`).
+- `unplaced` — `[{ partId, instanceId }]` for instances that did not fit;
+  `instanceId` shares one numbering with placed instances (by engine id).
+- `sheetsUsed` — `[{ sheetId, instancesUsed }]`.
+
+### Sheet policy (application layer)
+
+```json
+"sheets": [ { "id": "sheet-3000x1500", "mode": "auto", "polygontree": { ... } } ]
+```
+
+- `mode: "finite"` (default) — use exactly `quantity` instances (default 1).
+- `mode: "auto"` — the server expands the single sheet type to
+  `totalPartInstances` instances (one per part instance; the engine opens them
+  lazily and unused instances never appear in the result). This is safe because
+  one sheet per part instance is always an upper bound.
+- Still one sheet **type** per job. Multiple different sheet geometries require
+  a resource-selection strategy and are out of scope.
 
 Multiple sheets: structurally supported by canonical geometry and usable by the
-engine **only when enough instances are provided**. Because exhaustion is
-unrecoverable and identity for identical-geometry copies is broken, the public
-HTTP geometry contract currently accepts exactly one sheet. The SVG path still
-represents a single bin.
+engine when enough instances are provided. Because identity for
+identical-geometry copies is unreliable internally, the public HTTP geometry
+contract still accepts exactly one sheet type; `quantity`/`auto` control how many
+instances of it are provided. The SVG path represents a single bin.
 
 ## Candidate Canonical Boundary
 

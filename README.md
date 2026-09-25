@@ -160,10 +160,14 @@ Notes on `format: "geometry"`:
 
 - Coordinates may use any unit, but they must be consistent; `spacing` and
   `curveTolerance` use the same unit. `units` is metadata only.
-- Exactly one sheet is accepted for now. The engine can consume multiple
-  provided sheet instances, but if they run out while parts remain it fails the
-  job (`ENGINE_ERROR`); instance identity for `quantity > 1` of one sheet is also
-  not reliable yet.
+- One sheet **type** per job. `quantity` (default 1) or `mode: "auto"` control
+  how many physical instances are given to the engine. `auto` expands to one
+  instance per part instance; the engine opens them lazily and unused instances
+  are dropped. If the provided instances run out while parts remain, the job
+  returns a **partial result** — `placementComplete: false`, `unplaced:
+  [{partId, instanceId}]`, `sheetsUsed: [{sheetId, instancesUsed}]` — instead of
+  an error. Multiple different sheet geometries need a resource-selection
+  strategy and are out of scope for now.
 - `GET /result.svg` is unavailable and returns
   `400 {"error":{"code":"RESULT_FORMAT_UNAVAILABLE",...}}`. `GET /result` still
   works.

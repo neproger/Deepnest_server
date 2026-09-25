@@ -706,7 +706,7 @@ test("geometry input: rejects invalid geometry and structure", async () => {
   assert.equal(multiSheet.json.error.code, "INVALID_GEOMETRY");
 });
 
-test("geometry input: sheet exhaustion fails the job without killing the server", async () => {
+test("geometry input: insufficient sheets yield a partial result with unplaced parts", async () => {
   const tight = {
     id: "tight",
     quantity: 1,
@@ -741,18 +741,122 @@ test("geometry input: sheet exhaustion fails the job without killing the server"
   assert.equal(created.status, 202);
   const id = created.json.jobId;
 
-  const failed = await waitFor(
-    async () => {
-      const snapshot = (await getJson(`/api/v1/jobs/${id}`)).json;
-      return snapshot?.status === "failed" ? snapshot : null;
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 ? res.json : null;
+  }, { message: "no partial result" });
+
+  assert.equal(result.placementComplete, false);
+  assert.equal(result.placements.length, 1);
+  assert.equal(result.unplaced.length, 1);
+  assert.equal(result.unplaced[0].partId, "big");
+  assert.deepEqual(result.sheetsUsed, [{ sheetId: "tight", instancesUsed: 1 }]);
+
+  // Partial result is a valid calculation, not an engine error: server alive.
+  assert.equal((await fetch(`${base}/health`)).status, 200);
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("geometry input: finite sheet quantity > 1 is used up to the limit", async () => {
+  const sheet = {
+    id: "sheet-A",
+    quantity: 2,
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 120, y: 0 },
+        { x: 120, y: 60 },
+        { x: 0, y: 60 },
+      ],
+      children: [],
     },
-    { timeout: 20_000, message: "job did not fail on sheet exhaustion" }
+  };
+  const block = {
+    id: "big",
+    quantity: 2,
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 115, y: 0 },
+        { x: 115, y: 55 },
+        { x: 0, y: 55 },
+      ],
+      children: [],
+    },
+  };
+
+  const created = await createJob({
+    input: { format: "geometry", units: "mm", sheets: [sheet], parts: [block] },
+    config: { spacing: 0, timeRatio: 0 },
+  });
+  const id = created.json.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 && res.json.placementComplete ? res.json : null;
+  }, { message: "finite multi-instance sheets did not complete" });
+
+  assert.equal(result.placements.length, 2);
+  assert.deepEqual(result.unplaced, []);
+  assert.deepEqual(result.sheetsUsed, [{ sheetId: "sheet-A", instancesUsed: 2 }]);
+  assert.deepEqual(
+    result.placements.map((p) => p.sheetInstanceId).sort(),
+    [0, 1]
   );
-  assert.equal(failed.error.code, "ENGINE_ERROR");
 
-  // The server must still be alive and serving.
-  const health = await fetch(`${base}/health`);
-  assert.equal(health.status, 200);
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
 
+test("geometry input: auto sheet mode expands to as many instances as needed", async () => {
+  const sheet = {
+    id: "auto-sheet",
+    mode: "auto",
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 300, y: 0 },
+        { x: 300, y: 200 },
+        { x: 0, y: 200 },
+      ],
+      children: [],
+    },
+  };
+  const big = {
+    id: "big",
+    quantity: 2,
+    polygontree: {
+      points: [
+        { x: 0, y: 0 },
+        { x: 280, y: 0 },
+        { x: 280, y: 180 },
+        { x: 0, y: 180 },
+      ],
+      children: [],
+    },
+  };
+
+  const created = await createJob({
+    input: { format: "geometry", units: "mm", sheets: [sheet], parts: [big] },
+    config: { spacing: 0, timeRatio: 0 },
+  });
+  const id = created.json.jobId;
+
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 && res.json.placementComplete ? res.json : null;
+  }, { message: "auto sheet job did not complete" });
+
+  assert.equal(result.placements.length, 2);
+  assert.deepEqual(result.sheetsUsed, [
+    { sheetId: "auto-sheet", instancesUsed: 2 },
+  ]);
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
   await deleteJob(id);
 });

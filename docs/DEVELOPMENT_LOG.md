@@ -1187,3 +1187,98 @@ npm test   # 38/38 PASS
 Выбирать по фактической боли. Открытые ограничения: multiple sheets (engine
 exhaustion + identity копий), depth>1 islands, result rendering для geometry,
 CLI, native ABI. Winding закрыт (не требует изменений).
+
+---
+
+## 2026-09-25 — Sheet exhaustion, sheet policy (finite/auto) and unplaced
+
+### Goal
+
+Исправить terminal condition при исчерпании sheets в `placeParts()` (partial
+result + unplaced вместо `polygonArea(undefined)`), затем построить application-
+level Sheet Policy: finite `quantity > 1` и `mode: "auto"` для одного sheet type.
+
+### 1. Fix terminal condition в `placeParts()` (main/background.js)
+
+Было:
+
+```js
+var sheet = _sheets.shift();
+var sheetarea = Math.abs(GeometryUtil.polygonArea(sheet)); // undefined -> throw
+...
+if(sheets.length == 0){ break; }   // проверял исходный массив, а не остаток
+```
+
+Стало:
+
+- в начале `while`: `if(_sheets.length == 0) break;` — оставшиеся детали
+  становятся unplaced, без исключения;
+- нижняя проверка тоже переведена на `_sheets.length`;
+- возвращаемое значение получило `unplaced: [{id, source, filename, rotation}]`
+  (движок-координаты), `area` защищён от `undefined` (`typeof sheetarea === 'number'`).
+
+Это terminal condition, не изменение nesting-алгоритма: NFP/GA/Clipper/offset не
+тронуты.
+
+### 2. Engine callback
+
+`src/geometry/engine.mjs`: в payload добавлен `unplaced` (из `data.unplaced`) и
+`status.unplaced`. `complete` теперь `result.length === total` (при unplaced —
+false). Логика ошибок worker сохранена (guard из прошлого этапа).
+
+### 3. External result (`src/jobs/input.mjs`)
+
+`toExternalResult`:
+
+- `instanceId` присваивается в **глобальном engine-id порядке** по placed ∪
+  unplaced → единая нумерация, unplaced получают продолжение;
+- добавлен `unplaced: [{partId, instanceId, raw}]`;
+- добавлен `sheetsUsed: [{sheetId, instancesUsed}]` (число реально
+  использованных инстансов);
+- `sheetInstanceId` по-прежнему по порядку открытия (не по баганому `sheetid`).
+
+### 4. Sheet policy (application layer)
+
+`src/geometry/json-adapter.mjs`: DTO sheet сохраняет `mode`.
+
+`src/jobs/input.mjs` `validateGeometryInput`:
+
+- валидирует `mode ∈ {finite, auto}` (иначе `INVALID_REQUEST`);
+- `finite` (default) — используется заданный `quantity` (default 1);
+- `auto` — `quantity = totalPartInstances` (сумма quantity всех parts). Верхняя
+  граница: один лист на экземпляр детали всегда достаточно; движок открывает их
+  лениво, неиспользованные не попадают в result;
+- по-прежнему ровно один sheet **type** (`sheets.length === 1`), но `quantity`
+  может быть >1.
+
+### 5. Тесты
+
+- `tests/core/sheets.test.mjs`:
+  - quantity>1 одного sheet → два инстанса, `sheetsUsed.instancesUsed=2`,
+    `sheetInstanceId` [0,1];
+  - разные sheet geometries различаются (engine level), `sheetId` по source;
+  - **исчерпание** → partial result: `complete=false`, `placed=1`,
+    `unplaced=[{partId:"p", instanceId:1}]`, `sheetsUsed`=1; без exception;
+  - engine работает после partial-случая.
+- `tests/server/jobs.test.mjs`:
+  - insufficient sheets → HTTP partial (`placementComplete:false`, `unplaced`,
+    `sheetsUsed`), сервер жив;
+  - `finite quantity=2` → complete, 2 листа использованы;
+  - `mode:"auto"` → сервер разворачивает до totalPartInstances, `sheetsUsed=2`.
+- Прогон: **40/40 PASS** (`npm test`).
+
+### 6. Документация
+
+- `docs/GEOMETRY_PIPELINE.md`: Sheet identity contract обновлён (partial вместо
+  exception), добавлен раздел **Sheet policy**.
+- `README.md`: `mode`, `unplaced`, `sheetsUsed`, partial-семантика.
+- `docs/DEVELOPMENT_LOG.md`: эта запись.
+
+### Commit
+
+Фиксируется отдельным commit этого этапа (hash добавляется следом).
+
+### Далее
+
+Остаётся: несколько **разных** sheet types в одном job (стратегия выбора
+ресурса), depth>1 islands, geometry→SVG renderer, CLI, native ABI.

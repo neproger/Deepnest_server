@@ -160,13 +160,37 @@ function validateGeometryInput(input, config, execution) {
 
   // Public JSON DTO → internal canonical geometry (validation throws
   // GeometryValidationError, code INVALID_GEOMETRY).
-  const geometry = normalizeGeometry(parseGeometryInput(input));
+  const parsed = parseGeometryInput(input);
 
-  // Multiple sheets are representable but identity for >1 sheet is not
-  // guaranteed yet, so the HTTP contract accepts exactly one for now.
+  // Sheet policy (application layer): resolve how many physical sheet
+  // instances to give the engine, before canonical validation.
+  const VALID_MODES = ["finite", "auto"];
+  const totalPartInstances = parsed.parts.reduce(
+    (sum, part) => sum + (Number.isInteger(part.quantity) && part.quantity > 0 ? part.quantity : 1),
+    0
+  );
+  for (const sheet of parsed.sheets) {
+    if (sheet.mode !== undefined && !VALID_MODES.includes(sheet.mode)) {
+      throw httpError(
+        400,
+        "INVALID_REQUEST",
+        'sheet.mode must be "finite" or "auto"'
+      );
+    }
+    if (sheet.mode === "auto") {
+      // One sheet per part instance is always enough; the engine opens them
+      // lazily and unused instances are dropped from the result.
+      sheet.quantity = totalPartInstances;
+    }
+  }
+
+  const geometry = normalizeGeometry(parsed);
+
+  // One sheet *type* is supported for now (multiple sheet geometries require
+  // a resource-selection strategy and are out of scope). `quantity` may be >1.
   if (geometry.sheets.length !== 1) {
     throw new GeometryValidationError(
-      "exactly one sheet is currently supported by the geometry input"
+      "exactly one sheet type is currently supported by the geometry input"
     );
   }
 
@@ -279,13 +303,14 @@ export function buildSheetMap(sheets) {
 /**
  * Convert the engine result to the stable external result contract.
  *
- * `instanceId`/`sheetInstanceId` are derived from engine order, so they stay
- * stable across successive best-result updates.
+ * `instanceId` is assigned by engine instance id across both placed and
+ * unplaced instances, so it is stable and non-overlapping. `sheetInstanceId`
+ * is derived from the order in which the engine opened sheet instances of a
+ * sheet type (raw `sheetid` is unreliable for `quantity > 1`).
  */
 export function toExternalResult(data, status, sheetMap) {
-  const counters = new Map();
   const sheetInstanceCounters = new Map();
-  const placements = [];
+  const placed = [];
 
   for (const group of data.placements) {
     const sheet = sheetMap ? sheetMap[group.sheet] : undefined;
@@ -296,33 +321,85 @@ export function toExternalResult(data, status, sheetMap) {
     for (const placement of group.sheetplacements
       .slice()
       .sort((a, b) => a.id - b.id)) {
-      const partId = placement.filename;
-      const instanceId = counters.get(partId) ?? 0;
-      counters.set(partId, instanceId + 1);
-      placements.push({
-        partId,
-        instanceId,
+      placed.push({
+        placement,
+        engineId: placement.id,
         sheetId,
         sheetInstanceId,
-        x: placement.x,
-        y: placement.y,
-        rotation: placement.rotation,
-        ...(placement.mergedLength !== undefined && {
-          mergedLength: placement.mergedLength,
-        }),
-        ...(placement.mergedSegments !== undefined && {
-          mergedSegments: placement.mergedSegments,
-        }),
-        raw: {
-          id: placement.id,
-          source: placement.source,
-          filename: placement.filename,
-          sheet: group.sheet,
-          sheetid: group.sheetid,
-        },
+        group,
       });
     }
   }
+
+  const unplacedRaw = (data.unplaced || []).map((unplaced) => ({
+    ...unplaced,
+    engineId: unplaced.id,
+  }));
+
+  // Assign instanceId per partId in global engine-id order so placed and
+  // unplaced instances share one consistent numbering.
+  const instanceById = new Map();
+  const counters = new Map();
+  const all = [
+    ...placed.map((entry) => ({
+      engineId: entry.engineId,
+      partId: entry.placement.filename,
+    })),
+    ...unplacedRaw.map((entry) => ({
+      engineId: entry.engineId,
+      partId: entry.filename,
+    })),
+  ].sort((a, b) => a.engineId - b.engineId);
+  for (const entry of all) {
+    const instanceId = counters.get(entry.partId) ?? 0;
+    counters.set(entry.partId, instanceId + 1);
+    instanceById.set(entry.engineId, instanceId);
+  }
+
+  const placements = placed.map((entry) => {
+    const p = entry.placement;
+    return {
+      partId: p.filename,
+      instanceId: instanceById.get(entry.engineId),
+      sheetId: entry.sheetId,
+      sheetInstanceId: entry.sheetInstanceId,
+      x: p.x,
+      y: p.y,
+      rotation: p.rotation,
+      ...(p.mergedLength !== undefined && { mergedLength: p.mergedLength }),
+      ...(p.mergedSegments !== undefined && { mergedSegments: p.mergedSegments }),
+      raw: {
+        id: p.id,
+        source: p.source,
+        filename: p.filename,
+        sheet: entry.group.sheet,
+        sheetid: entry.group.sheetid,
+      },
+    };
+  });
+
+  const unplaced = unplacedRaw.map((entry) => ({
+    partId: entry.filename,
+    instanceId: instanceById.get(entry.engineId),
+    raw: {
+      id: entry.id,
+      source: entry.source,
+      filename: entry.filename,
+      rotation: entry.rotation,
+    },
+  }));
+
+  const used = new Map();
+  for (const placement of placements) {
+    if (!used.has(placement.sheetId)) {
+      used.set(placement.sheetId, new Set());
+    }
+    used.get(placement.sheetId).add(placement.sheetInstanceId);
+  }
+  const sheetsUsed = [...used.entries()].map(([sheetId, instances]) => ({
+    sheetId,
+    instancesUsed: instances.size,
+  }));
 
   return {
     fitness: data.fitness,
@@ -330,6 +407,8 @@ export function toExternalResult(data, status, sheetMap) {
     mergedLength: data.mergedLength,
     index: data.index,
     placements,
+    unplaced,
+    sheetsUsed,
     status,
   };
 }

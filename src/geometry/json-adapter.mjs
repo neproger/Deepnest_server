@@ -56,6 +56,7 @@ function toEntry(entry, where) {
   return {
     id: entry.id,
     quantity: entry.quantity,
+    mode: entry.mode,
     polygontree: toPolygon(entry.polygontree, `${where}.polygontree`),
   };
 }

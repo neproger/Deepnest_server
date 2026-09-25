@@ -160,15 +160,18 @@ async function run(geometry, renderContext, callback, options) {
     const result = data.placements.flatMap(({ sheetplacements }) =>
       sheetplacements.slice().sort((a, b) => a.id - b.id)
     );
+    const unplaced = data.unplaced || [];
     return callback({
       result,
       data,
       elements: normalized.parts,
+      unplaced,
       status: {
         better,
         complete: result.length === total,
         placed: result.length,
         total,
+        unplaced: unplaced.length,
       },
       svg: renderContext
         ? () => renderContext.render(deepNest, data, `${result.length}/${total}`)

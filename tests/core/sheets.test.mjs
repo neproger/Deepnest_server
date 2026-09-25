@@ -19,9 +19,11 @@ const rect = (w, h) => {
 function run(geometry, options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
+    let abortFn = null;
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
+        abortFn?.().catch(() => {});
         reject(new Error("nesting timed out"));
       }
     }, 30_000);
@@ -41,6 +43,41 @@ function run(geometry, options = {}) {
         settle({ payload });
       },
       { units: "mm", spacing: 0, rotations: 2, ...options, onError: (e) => settle({ error: e }) }
+    )
+      .then((abort) => {
+        abortFn = abort;
+      })
+      .catch(reject);
+  });
+}
+
+/** Resolve on the first placement (complete or partial) and abort. */
+function runPartial(geometry, options = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error("nesting timed out"));
+      }
+    }, 30_000);
+    nestGeometry(
+      geometry,
+      async (payload) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          await payload.abort();
+        } catch {}
+        resolve({ payload });
+      },
+      { units: "mm", spacing: 0, rotations: 2, ...options, onError: (e) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ error: e });
+      } }
     ).catch(reject);
   });
 }
@@ -80,6 +117,9 @@ test("multiple instances of one sheet geometry are used in order", async () => {
     [0, 1],
     "stable per-type sheetInstanceId"
   );
+  assert.deepEqual(external.sheetsUsed, [
+    { sheetId: "sheet-A", instancesUsed: 2 },
+  ]);
 });
 
 test("different sheet geometries are distinguished by the engine", async () => {
@@ -120,16 +160,35 @@ test("different sheet geometries are distinguished by the engine", async () => {
     [0, 0],
     "each sheet type instance 0"
   );
+  assert.deepEqual(
+    external.sheetsUsed.map((s) => s.sheetId).sort(),
+    ["sheet-large", "sheet-small"]
+  );
 });
 
-test("sheet exhaustion fails the job instead of crashing the engine", async () => {
-  const result = await run({
+test("sheet exhaustion returns a partial result with unplaced parts", async () => {
+  const { payload, error } = await runPartial({
     sheets: [{ id: "sheet-A", quantity: 1, polygontree: rect(120, 60) }],
     parts: [{ id: "p", quantity: 2, polygontree: rect(115, 55) }],
   });
 
-  assert.ok(result.error, "engine must report an error when sheets run out");
-  assert.ok(result.error instanceof Error);
+  assert.ok(payload, error?.message);
+  assert.equal(payload.status.complete, false);
+  assert.equal(payload.status.placed, 1);
+  assert.equal(payload.status.unplaced, 1);
+  assert.equal(payload.unplaced.length, 1);
+  assert.equal(payload.data.unplaced[0].filename, "p");
+
+  const external = toExternalResult(
+    payload.data,
+    payload.status,
+    buildSheetMap([{ id: "sheet-A", quantity: 1 }])
+  );
+  assert.equal(external.placements.length, 1);
+  assert.equal(external.unplaced.length, 1);
+  assert.equal(external.unplaced[0].partId, "p");
+  assert.equal(external.unplaced[0].instanceId, 1);
+  assert.deepEqual(external.sheetsUsed, [{ sheetId: "sheet-A", instancesUsed: 1 }]);
 });
 
 test("a normal job still works after a sheet-exhaustion failure", async () => {

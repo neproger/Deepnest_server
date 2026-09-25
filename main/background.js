@@ -789,6 +789,12 @@ function placeParts({ sheets, parts, config, index: nestindex }){
 	
 	while(parts.length > 0){
 		
+		// No sheet instances left: the remaining parts cannot be placed.
+		// This is a valid partial result (unplaced parts), not an engine error.
+		if(_sheets.length == 0){
+			break;
+		}
+		
 		var placed = [];
 		var placements = [];
 		
@@ -1111,7 +1117,7 @@ function placeParts({ sheets, parts, config, index: nestindex }){
 			break; // something went wrong
 		}
 		
-		if(sheets.length == 0){
+		if(_sheets.length == 0){
 			break;
 		}
 	}
@@ -1124,9 +1130,26 @@ function placeParts({ sheets, parts, config, index: nestindex }){
 	// send finish progerss signal
 	parentPort.postMessage({ type: 'background-progress', data: { phase: 'placement', index: nestindex, progress: 1, threads: 1 }});
 
+	// parts remaining after the loop are unplaced instances (valid partial result)
+	var unplaced = [];
+	for(i=0; i<parts.length; i++){
+		unplaced.push({
+			id: parts[i].id,
+			source: parts[i].source,
+			filename: parts[i].filename,
+			rotation: parts[i].rotation
+		});
+	}
 	// console.log('WATCH', allplacements);
 	
-	return {placements: allplacements, fitness: fitness, area: sheetarea, mergedLength: totalMerged, index: nestindex };
+	return {
+		placements: allplacements,
+		fitness: fitness,
+		area: typeof sheetarea === 'number' ? sheetarea : 0,
+		mergedLength: totalMerged,
+		index: nestindex,
+		unplaced: unplaced
+	};
 }
 
 // clipperjs uses alerts for warnings
