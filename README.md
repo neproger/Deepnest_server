@@ -52,14 +52,52 @@ npm start        # run the headless HTTP server (alias: npm run server)
 node cli.mjs     # run the CLI
 ```
 
-`npm start` listens on `http://127.0.0.1:8080`. The only nesting endpoint is
-`POST /nest` (SSE). See `docs/DEVELOPMENT_LOG.md` for the current HTTP contract
-and baseline.
+`npm start` listens on `http://127.0.0.1:8080`.
+
+### HTTP API
+
+The new Job API is versioned under `/api/v1`:
+
+```text
+POST   /api/v1/jobs              create a job (202 + jobId)
+GET    /api/v1/jobs/:id          lifecycle snapshot
+GET    /api/v1/jobs/:id/result   best structured placements
+GET    /api/v1/jobs/:id/result.svg
+GET    /api/v1/jobs/:id/events   SSE: job.started / engine.progress / result.updated / job.stopped / job.completed / job.failed
+POST   /api/v1/jobs/:id/stop     stop the job (idempotent)
+DELETE /api/v1/jobs/:id          delete a finished job
+GET    /health
+```
+
+`POST /api/v1/jobs` body:
+
+```json
+{
+  "input": {
+    "format": "svg",
+    "bin": { "id": "sheet-1", "data": "<svg>...</svg>" },
+    "parts": [
+      { "id": "part-A", "data": "<svg>...</svg>", "quantity": 1 }
+    ]
+  },
+  "config": { "units": "mm", "spacing": 0 },
+  "execution": { "timeLimitMs": 10000 }
+}
+```
+
+Placements use the client's own ids: `{ partId, instanceId, sheetId, x, y, rotation }`.
+`placementComplete` means every part is placed in the current best result; it is
+independent of `job.status === "completed"` (the genetic search may keep
+improving until stopped or `execution.timeLimitMs` elapses). Concurrency is
+`maxConcurrentJobs = 1`; additional jobs are queued.
+
+The legacy `POST /nest` (multipart, SSE) endpoint is kept as a regression
+baseline. See `docs/DEVELOPMENT_LOG.md` for details.
 
 ### Test
 
 ```sh
-npm test          # core + native addon + HTTP server
+npm test          # core + native addon + HTTP server (legacy + Job API)
 npm run test:core
 npm run test:server
 ```

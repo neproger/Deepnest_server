@@ -3,8 +3,6 @@ import { Worker } from "worker_threads";
 import { DeepNest } from "./main/deepnest.js";
 import { nestingToSVG } from "./main/nestingToSVG.mjs";
 
-const eventEmitter = new EventTarget();
-
 /**
  *
  * @param {*} svgInput
@@ -25,6 +23,9 @@ export async function nest(
     ...config
   }
 ) {
+  // Each job gets its own emitter. A module-level emitter would leak listeners
+  // and cross-dispatch events (background-*/placement) between sequential jobs.
+  const eventEmitter = new EventTarget();
   // scale is stored in units/inch
   const ratio = units === "mm" ? 1 / 25.4 : 1;
   /**
@@ -65,7 +66,9 @@ export async function nest(
       ? `<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="${
           bin.width * ratio * scale
         }" height="${bin.height * ratio * scale}" class="sheet"/></svg>`
-      : `<svg xmlns="http://www.w3.org/2000/svg">${bin}</svg>`
+      : /<svg[\s>]/i.test(bin)
+        ? bin
+        : `<svg xmlns="http://www.w3.org/2000/svg">${bin}</svg>`
   );
   sheetSVG.sheet = true;
   const elements = svgInput

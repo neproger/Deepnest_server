@@ -390,3 +390,177 @@ POST /nest  -> 200 text/event-stream (контракт не менялся)
 2. `sse.js` можно удалить одновременно с заменой HTTP-обвязки.
 3. Добавить headless CI (сборка addon + `npm test`).
 4. Не смешивать cleanup с behavioral refactoring (engine issues остаются в debt, см. PROJECT_VISION `Known Architectural Debt`).
+
+---
+
+## 2026-09-25 — HTTP Job API v1 (`/api/v1/jobs`)
+
+### Goal
+
+Построить первый собственный API проекта — долгоживущий nesting Job поверх
+существующего `nest()`, не меняя nesting algorithm/geometry pipeline и не
+удаляя legacy `POST /nest`.
+
+### Starting state
+
+- baseline: `b41fd0d`; cleanup: `d07ab1e`, follow-up `8e831ba`
+- `npm test` = 3/3 PASS
+- core: `index.mjs`, `main/**`, `src/{addon,minkowski}.cc`
+- server: `server.mjs` (`GET /health`, `POST /nest`)
+
+### Design
+
+- **Lifecycle ≠ placement quality.** `status.complete` от Deepnest означает «в
+  текущем placement размещены все детали», а не «генетический поиск завершён».
+  Поэтому `job.status` не переходит в `completed` по `placementComplete`.
+  Отдельно хранится `placementComplete` (best placement state).
+- Job states: `queued → running → stopped | completed | failed`.
+  `completed` только при заданном нормальном stop condition (`execution.timeLimitMs`).
+  Без limit job работает до явного stop.
+- `maxConcurrentJobs = 1`, лишние jobs в `queued` (не ошибка), следующий
+  стартует автоматически после stop/finish.
+- External IDs: `part.id`/`bin.id` → placements `partId`/`instanceId`/`sheetId`.
+  Legacy `source/id/filename` спрятаны в `placement.raw`.
+- Structured placements — основной контракт; SVG вынесен в
+  `GET /api/v1/jobs/:id/result.svg`.
+
+### Tried
+
+#### 1. Изоляция engine на уровне job
+
+`index.mjs` создавал `eventEmitter` на уровне модуля. Для последовательных jobs
+это давало бы cross-job события и утечку listeners. Перенёс создание emitter
+внутрь `nest()`. Поведение одного job не изменилось.
+
+#### 2. Новые модули
+
+- `src/jobs/input.mjs` — валидация + адаптер `HTTP svg → nest()` и
+  `engine result → external placements`;
+- `src/jobs/job.mjs` — Job (lifecycle, best result, abort, timeLimit);
+- `src/jobs/job-manager.mjs` — registry + очередь + maxConcurrent;
+- `src/api/jobs-router.mjs` — express router + SSE + единый JSON error format.
+
+#### 3. Первый прогон `tests/server/jobs.test.mjs` — FAIL
+
+Command:
+
+```bash
+node --test tests/server/jobs.test.mjs
+```
+
+Result:
+
+- процесс завис; в TAP: `no result while running`, затем `A did not start`.
+- в выводе: `Excluding poly null SVGSVGElement { children: HTMLCollection {} }`.
+
+Cause (две проблемы):
+
+1. `nest()` оборачивает строковый `bin` в `<svg>...</svg>`. Новый API передаёт
+   уже полный SVG-document для bin → двойная обёртка → вложенный `<svg>`,
+   который `flatten` не разворачивает, sheet-полигон не извлекается → `No sheet`.
+2. Каскад: упавший тест не остановил job, слот `maxConcurrentJobs = 1` остался
+   занят, поэтому следующий job вечно `queued` («A did not start»).
+
+Resolution:
+
+- `index.mjs`: если строка `bin` уже похожа на `<svg ...>`, не оборачивать
+  (`/<svg[\s>]/i.test(bin) ? bin : wrap`);
+- тесты теперь всегда останавливают/удаляют jobs (и `after → jobs.stopAll()`).
+
+#### 4. Dependency cleanup
+
+- `sse.js` — после удаления demo HTML больше нигде не импортируется (новый SSE
+  endpoint пишет поток сам) → удалён из `package.json`;
+- `config.json` — не referenced ни одним runtime/test/CLI path (только legacy
+  sample robot-конфига) → удалён.
+
+### Successful
+
+* `POST /api/v1/jobs` создаёт реальный nesting job (202 + jobId).
+* Lifecycle `queued/running/stopped/completed/failed` работает.
+* Best result доступен во время `running`.
+* SSE транслирует `job.status` (snapshot), `job.started`, `engine.progress`,
+  `result.updated`, `job.stopped`, `job.completed`, `job.failed`.
+* Stop корректно завершает Deepnest (abort) и освобождает слот; следующий
+  queued job стартует.
+* Stable IDs: `part-A`/`part-B` возвращаются как `partId`; `sheetId` = `bin.id`.
+* Structured placements — основной ответ; `result.svg` сохранён.
+* Legacy `POST /nest` не изменён и проходит baseline test.
+* `npm test` = 10/10 PASS.
+
+### Problems found
+
+#### Problem: full-document bin double-wrapped
+
+Observed: нет placements, warning `Excluding poly null SVGSVGElement`.
+
+Cause: см. выше `nest()` оборачивал полный `<svg>` в ещё один `<svg>`.
+
+Resolution: adapter fix in `index.mjs`. Status: fixed.
+
+#### Problem: MaxListeners / cross-job contamination (потенциальный)
+
+Observed: теоретически — общий module-level emitter.
+
+Cause: `const eventEmitter = new EventTarget()` на уровне модуля.
+
+Resolution: emitter теперь создаётся в `nest()` per job. Sequential A/B/C тест
+проверяет отсутствие `MaxListenersExceededWarning` и contamination. Status: fixed.
+
+#### Problem: `source`/`filename` semantics
+
+Observed: engine `source` — индекс в `deepNest.parts` с офсетом листа; наружу
+не отдаём.
+
+Resolution: boundary adapter мапит `filename` → `partId`, `id` → `instanceId`,
+`sheetid`/sheet → `binId`; legacy поля в `raw`. Status: handled.
+
+### Changes made
+
+- `index.mjs` — per-job `EventTarget`; поддержка full-svg `bin` без повторной обёртки.
+- `src/jobs/input.mjs`, `src/jobs/job.mjs`, `src/jobs/job-manager.mjs` — новые.
+- `src/api/jobs-router.mjs` — новый.
+- `server.mjs` — `express.json`, `JobManager`, роутер `/api/v1`, error middleware,
+  экспорт `jobs`.
+- `package.json`/`package-lock.json` — удалён `sse.js`; удалён `config.json`.
+- `README.md` — раздел HTTP API.
+- `tests/fixtures/{bin,part}.svg`, `tests/server/jobs.test.mjs` — новые.
+- `docs/DEVELOPMENT_LOG.md` — эта запись.
+
+### Verification
+
+```bash
+node --test tests/server/jobs.test.mjs   # 7/7 PASS (~3.4s)
+npm test                                 # 10/10 PASS (~3.6s)
+```
+
+Покрытые сценарии: create+status, result while running, stable ids, SSE,
+stop, next job, queue, sequential isolation, invalid input (JSON error),
+time limit → completed, delete running → 409, unknown job → 404.
+
+### Current known-good baseline
+
+1. `npm test` — 10/10 PASS: core nest, core native addon, legacy `/nest`,
+   Job API (7).
+2. `npm start` — `GET /health`, legacy `POST /nest`, `POST /api/v1/jobs`.
+3. Job API: `POST/GET/GET result/GET result.svg/GET events/POST stop/DELETE`.
+4. `maxConcurrentJobs = 1`; queue автоматически продвигается.
+5. `placementComplete` отделён от `job.status === "completed"`.
+
+### Debt (не трогали)
+
+- legacy `POST /nest`, `busboy` и multipart-контракт — ещё нужны как baseline;
+- CLI (`cli.mjs`, `commander`, `ora`) — отдельный этап;
+- jsdom/DOM в core, canonical geometry, native ABI — по-прежнему debt;
+- `sheetId` пока всегда `bin.id` (engine открывает несколько sheets при
+  нехватке места; внешний `sheetId` для них ещё не различается);
+- `instanceId` вычисляется адаптером по engine `id` (стабилен per job);
+- best result и svg-функция удерживаются в памяти до `DELETE` job.
+
+### Next
+
+1. Сравнить новый API с legacy `/nest` (отчёт), затем отдельным этапом удалить
+   legacy `/nest` + `busboy` и старый multipart-контракт.
+2. Job Manager: вынести в `src/api`/`src/jobs` финализацию; рассмотреть
+   `maxConcurrentJobs > 1` после проверки engine lifecycle.
+3. Начать отделять `SVG adapter → geometry → core` (см. PROJECT_VISION).

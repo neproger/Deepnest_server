@@ -3,9 +3,15 @@ import express from "express";
 import { buffer } from "node:stream/consumers";
 import { pathToFileURL } from "url";
 import { nest } from "./index.node.mjs";
+import { JobManager } from "./src/jobs/job-manager.mjs";
+import { createJobsRouter } from "./src/api/jobs-router.mjs";
 
 export const app = express();
+export const jobs = new JobManager({ maxConcurrent: 1 });
 const PORT = 8080;
+
+app.use(express.json({ limit: "10mb" }));
+app.use("/api/v1", createJobsRouter(jobs));
 
 function parseForm(req, res, next) {
   const bb = busboy(req);
@@ -94,6 +100,29 @@ app.post(
   },
   nestSSE
 );
+
+// Stable JSON error format for the whole HTTP surface.
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    return next(error);
+  }
+  if (error?.status && error?.code) {
+    return res
+      .status(error.status)
+      .json({ error: { code: error.code, message: error.message } });
+  }
+  if (error instanceof SyntaxError && "body" in error) {
+    return res
+      .status(400)
+      .json({
+        error: { code: "INVALID_REQUEST", message: "Malformed JSON body" },
+      });
+  }
+  console.error(error);
+  return res.status(500).json({
+    error: { code: "ENGINE_ERROR", message: "Unexpected server error" },
+  });
+});
 
 /**
  * Start the existing HTTP server.
