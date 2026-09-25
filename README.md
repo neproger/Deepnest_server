@@ -15,6 +15,8 @@ Deepnest is a node application originally based on [SVGNest](https://github.com/
 
 See [docs/PROJECT_VISION.md](docs/PROJECT_VISION.md) for the target architecture: turning this fork into a universal headless 2D nesting service with an HTTP Job API. It defines the project boundaries and the preferred order of development. Read it before making architectural changes.
 
+See [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) for the chronological development journal and the current known-good baseline. Run `npm test` (core + native addon + HTTP server) or `npm run server` for a manual HTTP server.
+
 ## Fork History
 
 This repo was forked from [deepnest-io](https://github.com/deepnest-io/Deepnest) in order to make Deepnest work on node, decoupled from the electron app, refer to the [example](server.mjs).

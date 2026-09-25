@@ -3,10 +3,10 @@ import express from "express";
 import { readFile, writeFile } from "fs/promises";
 import { buffer } from "node:stream/consumers";
 import { parse } from "opentype.js";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { nest } from "./index.node.mjs";
 
-const app = express();
+export const app = express();
 const PORT = 8080;
 
 function parseForm(req, res, next) {
@@ -296,23 +296,56 @@ app.post(
   nestSSE
 );
 
-async function start() {
-  /**
-   * @type FontBasicResponse[]
-   */
-  const fonts = await (
-    await fetch("https://api.fontsource.org/v1/fonts", { cache: "force-cache" })
-  ).json();
-  await writeFile("./fonts", JSON.stringify(fonts, null, 2));
+/**
+ * Start the existing HTTP server.
+ *
+ * This is a thin wrapper around the current `app`, kept so integration tests
+ * can boot the real server on an ephemeral port. The HTTP contract (routes,
+ * request/response formats) is unchanged.
+ *
+ * @param {{ port?: number, host?: string, prefetchFonts?: boolean }} [options]
+ * @returns {Promise<import("http").Server>}
+ */
+export async function start({ port = PORT, host, prefetchFonts = true } = {}) {
+  // The demo `/text` routes need a local list of Fontsource fonts. Fetching it
+  // is best-effort: an offline machine must still be able to run `/nest`.
+  if (prefetchFonts) {
+    try {
+      /**
+       * @type FontBasicResponse[]
+       */
+      const fonts = await (
+        await fetch("https://api.fontsource.org/v1/fonts", { cache: "force-cache" })
+      ).json();
+      await writeFile("./fonts", JSON.stringify(fonts, null, 2));
+    } catch (error) {
+      console.warn(
+        "Font prefetch failed (offline?), /text may be unavailable:",
+        error.message
+      );
+    }
+  }
 
-  const server = app.listen(PORT, () => {
-    console.log("Server listening on", `http://localhost:${PORT}`);
-  });
-
-  process.once("SIGINT", () => {
-    server.close();
-    process.exit();
+  return await new Promise((resolve) => {
+    const onListen = () => {
+      console.log("Server listening on", `http://${host || "localhost"}:${port}`);
+      resolve(server);
+    };
+    const server = host
+      ? app.listen(port, host, onListen)
+      : app.listen(port, onListen);
   });
 }
 
-start();
+const isMain =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  start().then((server) => {
+    process.once("SIGINT", () => {
+      server.close();
+      process.exit();
+    });
+  });
+}

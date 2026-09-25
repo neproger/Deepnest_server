@@ -51,7 +51,7 @@ export async function nest(
     spacing: spacing * ratio * scale, // stored value will be in units/inch
   };
   const deepNest = new DeepNest(eventEmitter, deepNestConfig);
-  const worker = new Worker(path.resolve("./main/background.js"));
+  const worker = new Worker(new URL("./main/background.js", import.meta.url));
   eventEmitter.addEventListener("background-start", ({ detail: data }) =>
     worker.postMessage(data)
   );
@@ -88,8 +88,14 @@ export async function nest(
   });
 
   let t = 0;
+  let aborted = false;
   const abort = async () => {
+    if (aborted) {
+      return;
+    }
+    aborted = true;
     clearTimeout(t);
+    process.off("SIGINT", abort);
     deepNest.stop();
     await worker.terminate();
   };

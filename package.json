@@ -8,8 +8,12 @@
   "bin": "cli.mjs",
   "scripts": {
     "start": "electron .",
+    "server": "node server.mjs",
     "serve": "nodemon server.mjs",
-    "test": "playwright test",
+    "test": "node --test tests/",
+    "test:core": "node --test tests/core/",
+    "test:server": "node --test tests/server/",
+    "test:ui": "playwright test",
     "exec": "electron --enable-logging main.test.js",
     "configure": "node-gyp configure --release",
     "build-all": "node-gyp rebuild && mkdir minkowski >nul 2>&1|echo . >nul && npm run build",
