@@ -12,6 +12,7 @@
 # package-lock.json
 git_token.rtf
 .idea
+.vscode/
 *.zip
 .python-version
 node_modules/
