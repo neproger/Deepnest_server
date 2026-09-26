@@ -1141,11 +1141,11 @@ namespace CorelDeepnest.Runtime
 
                 DrawingColor[] colors =
                 {
-                    DrawingColor.FromArgb(170, 41, 128, 185),
-                    DrawingColor.FromArgb(170, 39, 174, 96),
-                    DrawingColor.FromArgb(170, 243, 156, 18),
-                    DrawingColor.FromArgb(170, 142, 68, 173),
-                    DrawingColor.FromArgb(170, 192, 57, 43)
+                    DrawingColor.FromArgb(58, 41, 128, 185),
+                    DrawingColor.FromArgb(58, 39, 174, 96),
+                    DrawingColor.FromArgb(58, 243, 156, 18),
+                    DrawingColor.FromArgb(58, 142, 68, 173),
+                    DrawingColor.FromArgb(58, 192, 57, 43)
                 };
 
                 for (int placementIndex = 0;
@@ -1170,7 +1170,8 @@ namespace CorelDeepnest.Runtime
 
                     DrawingColor color = colors[placementIndex % colors.Length];
                     using (Brush fill = new SolidBrush(color))
-                    using (Pen outline = new Pen(DrawingColor.FromArgb(220, color), 1.5f))
+                    using (Pen outline = new Pen(
+                        DrawingColor.FromArgb(235, color.R, color.G, color.B), 1.8f))
                     using (Brush labelBrush = new SolidBrush(DrawingColor.Black))
                     using (var path = new GraphicsPath(FillMode.Alternate))
                     using (var labelFormat = new StringFormat
