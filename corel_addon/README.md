@@ -99,13 +99,12 @@ The compact row contains:
 
 - sheet width and height in millimeters;
 - spacing in millimeters;
-- allowed rotation count.
+- rotation variant count (`4` means 0°, 90°, 180°, and 270°).
 
 The expandable settings row contains:
 
 - placement strategy;
 - population size and mutation rate;
-- worker count;
 - SVG curve tolerance;
 - shared-line detection and fitness weight;
 - optional automatic time limit.

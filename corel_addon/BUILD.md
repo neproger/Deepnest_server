@@ -240,9 +240,9 @@ of Runtime build directories, so hot reload and package updates retain the last
 values entered by the user.
 
 The persisted fields are sheet width and height, spacing, rotation count,
-placement strategy, population size, mutation rate, worker count, SVG curve
-tolerance, shared-line weight, shared-line detection, and automatic time
-limit. Obsolete direct-geometry settings are ignored.
+placement strategy, population size, mutation rate, SVG curve tolerance,
+shared-line weight, shared-line detection, and automatic time limit. Obsolete
+direct-geometry and worker-count settings are ignored.
 
 Independent outer roots are separate parts, matching original Deepnest. If one
 Corel source object produces several roots, preview and nesting remain valid,

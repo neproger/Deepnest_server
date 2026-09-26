@@ -87,7 +87,6 @@ namespace CorelDeepnest.Runtime
             public int Rotations;
             public int PopulationSize;
             public int MutationRate;
-            public int Threads;
             public string PlacementType;
             public bool MergeLines;
             public double CurveTolerance;
@@ -328,7 +327,6 @@ namespace CorelDeepnest.Runtime
                 { "rotations", options.Rotations },
                 { "populationSize", options.PopulationSize },
                 { "mutationRate", options.MutationRate },
-                { "threads", options.Threads },
                 { "placementType", options.PlacementType },
                 { "mergeLines", options.MergeLines },
                 { "curveTolerance", options.CurveTolerance },
@@ -560,8 +558,7 @@ namespace CorelDeepnest.Runtime
             private readonly NumericUpDown rotations = NumberInput(4, 0);
             private readonly NumericUpDown populationSize = NumberInput(10, 0);
             private readonly NumericUpDown mutationRate = NumberInput(10, 0);
-            private readonly NumericUpDown threads = NumberInput(4, 0);
-            private readonly NumericUpDown curveTolerance = NumberInput(0.72M, 3);
+            private readonly NumericUpDown curveTolerance = NumberInput(0.3M, 3);
             private readonly NumericUpDown timeRatio = NumberInput(0.5M, 2);
             private readonly NumericUpDown timeLimitSeconds = NumberInput(0, 0);
             private readonly ComboBox placementType = new ComboBox();
@@ -581,13 +578,12 @@ namespace CorelDeepnest.Runtime
                 width.Minimum = 0.01M;
                 height.Minimum = 0.01M;
                 rotations.Minimum = 1;
+                rotations.Maximum = 16;
                 populationSize.Minimum = 3;
-                populationSize.Maximum = 1000;
-                mutationRate.Minimum = 1;
-                mutationRate.Maximum = 100;
-                threads.Minimum = 1;
-                threads.Maximum = 8;
-                curveTolerance.Minimum = 0.001M;
+                populationSize.Maximum = 64;
+                mutationRate.Minimum = 2;
+                mutationRate.Maximum = 64;
+                curveTolerance.Minimum = 0.1M;
                 curveTolerance.Maximum = 100;
                 curveTolerance.Increment = 0.01M;
                 timeRatio.Maximum = 1000;
@@ -620,7 +616,7 @@ namespace CorelDeepnest.Runtime
                 AddField(fields, "Width, mm", width);
                 AddField(fields, "Height, mm", height);
                 AddField(fields, "Spacing, mm", spacing);
-                AddField(fields, "Rotations", rotations);
+                AddField(fields, "Rotation variants", rotations);
 
                 var advancedFields = new FlowLayoutPanel
                 {
@@ -635,7 +631,6 @@ namespace CorelDeepnest.Runtime
                 AddField(advancedFields, "Placement", placementType);
                 AddField(advancedFields, "Population", populationSize);
                 AddField(advancedFields, "Mutation, %", mutationRate);
-                AddField(advancedFields, "Threads", threads);
                 AddField(advancedFields, "Tolerance, mm", curveTolerance);
                 AddField(advancedFields, "Line weight", timeRatio);
                 AddField(advancedFields, "Limit, sec", timeLimitSeconds);
@@ -643,9 +638,12 @@ namespace CorelDeepnest.Runtime
 
                 help.SetToolTip(placementType,
                     "gravity favors compact width; box minimizes bounding-box area; convexhull minimizes hull area.");
+                help.SetToolTip(spacing,
+                    "Minimum clearance between parts in millimeters. Use 0 when comparing with the SVGnest demo.");
+                help.SetToolTip(rotations,
+                    "Number of evenly spaced rotation variants, not degrees. 4 means 0, 90, 180, and 270 degrees.");
                 help.SetToolTip(populationSize, "Genetic population size. Larger values explore more candidates.");
                 help.SetToolTip(mutationRate, "Mutation probability in percent.");
-                help.SetToolTip(threads, "Worker count, from 1 to 8.");
                 help.SetToolTip(curveTolerance, "Geometry tolerance in millimeters.");
                 help.SetToolTip(timeRatio, "Weight of shared cutting-line length in fitness.");
                 help.SetToolTip(timeLimitSeconds, "0 means run until Stop; a positive value stops automatically.");
@@ -819,7 +817,6 @@ namespace CorelDeepnest.Runtime
                     Rotations = Convert.ToInt32(rotations.Value),
                     PopulationSize = Convert.ToInt32(populationSize.Value),
                     MutationRate = Convert.ToInt32(mutationRate.Value),
-                    Threads = Convert.ToInt32(threads.Value),
                     PlacementType = Convert.ToString(placementType.SelectedItem),
                     MergeLines = mergeLines.Checked,
                     CurveTolerance = Convert.ToDouble(curveTolerance.Value),
@@ -846,7 +843,6 @@ namespace CorelDeepnest.Runtime
                     SetNumber(values, "rotations", rotations);
                     SetNumber(values, "populationSize", populationSize);
                     SetNumber(values, "mutationRate", mutationRate);
-                    SetNumber(values, "threads", threads);
                     SetNumber(values, "curveTolerance", curveTolerance);
                     SetNumber(values, "timeRatio", timeRatio);
                     SetNumber(values, "timeLimitSeconds", timeLimitSeconds);
@@ -887,7 +883,6 @@ namespace CorelDeepnest.Runtime
                         { "rotations", options.Rotations },
                         { "populationSize", options.PopulationSize },
                         { "mutationRate", options.MutationRate },
-                        { "threads", options.Threads },
                         { "placementType", options.PlacementType },
                         { "mergeLines", options.MergeLines },
                         { "curveTolerance", options.CurveTolerance },
