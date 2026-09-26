@@ -25,10 +25,12 @@ selected Corel Curve shapes
   -> POST /api/v1/jobs
   -> poll /api/v1/jobs/{jobId}/result
   -> placement preview and raw JSON displayed in WinForms
+  -> duplicate, rotate, and move shapes on a new Corel layer
 ```
 
 The tested results placed two selected parts with rotated placements and zero
-unplaced parts.
+unplaced parts. A later manual test also confirmed a result spanning two sheet
+instances and successful application of the placements to CorelDRAW.
 
 ## Prerequisites
 
@@ -90,15 +92,17 @@ VstaMacro.cs
 Runtime\CorelDeepnest.Runtime.csproj
 Contracts\ICorelGateway.cs
 Contracts\CorelGateway.cs
+Contracts\GeometryExtraction.cs
 Contracts\CorelDeepnest.Contracts.csproj
 ```
 
 The loader creates a new `AppDomain` for every command and activates the
 current Runtime DLL directly inside that domain. A small shared Contracts DLL
-lets Runtime call `CorelGateway`; the gateway reads the selection beside the
-COM object and returns only JSON. The domain is unloaded when the command or
-form closes, so CorelDRAW does not retain each development build in its main
-application domain.
+lets Runtime call `CorelGateway`; the gateway reads the selection and applies
+placements beside the COM objects, while only JSON and primitive values cross
+the domain boundary. The gateway assembly is loaded from the current version
+directory, so its implementation can be updated together with Runtime. The
+child domain is unloaded when the command or form closes.
 
 Curve node coordinates from CorelDRAW are converted from the active document's
 units to millimeters and then from absolute document coordinates to local part
@@ -199,24 +203,63 @@ If `VstaLoader.cs` or the list of `[CgsAddInMacro]` commands changes, close
 CorelDRAW, rebuild, restart it, and load the new `.CGSaddon`. Do not load two
 files derived from the same template simultaneously: they share a project ID.
 
-## Current geometry limitations
+## Current geometry behavior and limitations
 
 `NestSelectedShapes` currently:
 
 - reads the active Corel selection;
-- requires every selected object to be a Curve shape;
-- requires exactly one closed subpath per shape;
-- accepts line segments only;
+- obtains non-destructive geometry from `Shape.DisplayCurve.GetCopy()`;
+- accepts rectangles, ellipses, polygons, and Curve shapes when Corel exposes a
+  usable display curve;
+- converts Bezier contours to polygons through `SubPath.GetPolyline`;
+- requires every subpath to be closed and geometrically valid;
+- determines outer contours and holes by containment, independently of winding;
+- sends direct holes through `PolygonDTO.children`;
+- splits disconnected outer contours and even-depth islands into independent
+  parts because one server part has one root polygon;
+- walks nested Corel groups recursively and treats each selected group as one
+  rigid part using a conservative convex hull;
 - creates a rectangular sheet from the form values;
 - submits one part per selected shape;
 - draws the returned placements on a sheet preview;
-- shows job status and the raw placements JSON;
-- lets the user stop a job while the dialog is polling;
-- does not modify, rotate, duplicate, or move Corel objects yet.
+- polls the result every 200 ms and refreshes the preview and raw JSON when the
+  server publishes a better result;
+- draws compact centered labels (`#1`, `#2`, ...) without rotation text;
+- keeps searching after `placementComplete=true`, because that flag describes
+  placement coverage rather than the genetic-search lifecycle;
+- lets the user stop the search and accept the latest best result;
+- enables `Apply to CorelDRAW` after a successful result;
+- creates a new result layer and a rectangular sheet on the active page;
+- supports multiple `sheetInstanceId` values and arranges their sheets from
+  left to right with a 20 mm gap;
+- duplicates, rotates, and moves each placed source shape;
+- leaves the source objects unchanged;
+- groups the complete application operation into one undo step.
 
 Sheet width, height, and spacing are millimeters. Selected-shape coordinates
 are converted from the active document unit to millimeters and normalized to a
 local origin before submission.
+
+Form values and the Corel-relevant engine settings are persisted in
+`%LOCALAPPDATA%\CorelDeepnest\settings.json`. The settings file is independent
+of Runtime build directories, so hot reload and package updates retain the last
+values entered by the user.
+
+The persisted fields are sheet width and height, spacing, rotation count,
+placement strategy, population size, mutation rate, worker count, Corel curve
+detail, geometry tolerance, shared-line weight, shared-line detection, and
+automatic time limit.
+
+Corel curve detail is an integer from 1 to 100 and defaults to 50. Higher values
+produce more polygon points. The addon rejects open, degenerate,
+self-intersecting, touching, and crossing contours and limits one flattened
+contour to 10,000 points. It does not silently weld or repair input geometry.
+
+Groups are supported when every leaf exposes closed `DisplayCurve` contours. A
+group is applied by duplicating the complete source group; its nesting proxy is
+a convex hull, so gaps between disconnected members cannot currently receive
+other parts. PowerClip, text conversion, effects, and physical outline
+expansion still require explicit handling.
 
 ## Known errors
 

@@ -67,7 +67,7 @@ namespace CorelDeepnest
                     false,
                     BindingFlags.Public | BindingFlags.Instance | BindingFlags.CreateInstance,
                     null,
-                    new object[] { command, CreateGateway() },
+                    new object[] { command, CreateGateway(Path.GetDirectoryName(runtimePath)) },
                     null,
                     null);
             }
@@ -104,35 +104,24 @@ namespace CorelDeepnest
             }
         }
 
-        private object CreateGateway()
+        private object CreateGateway(string runtimeDirectory)
         {
-            using (Stream source = Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream("CorelDeepnest.Contracts.dll"))
+            string contractsPath = Path.Combine(
+                runtimeDirectory, "CorelDeepnest.Contracts.dll");
+            if (!File.Exists(contractsPath))
             {
-                if (source == null)
-                {
-                    throw new FileNotFoundException(
-                        "The addon package does not contain its contracts DLL.");
-                }
-
-                var bytes = new byte[source.Length];
-                int offset = 0;
-                while (offset < bytes.Length)
-                {
-                    int read = source.Read(bytes, offset, bytes.Length - offset);
-                    if (read == 0)
-                    {
-                        throw new EndOfStreamException(
-                            "Could not read the embedded contracts DLL.");
-                    }
-                    offset += read;
-                }
-
-                Assembly contracts = Assembly.Load(bytes);
-                Type gatewayType = contracts.GetType(
-                    "CorelDeepnest.Contracts.CorelGateway", true);
-                return Activator.CreateInstance(gatewayType, new object[] { app });
+                throw new FileNotFoundException(
+                    "The current CorelDeepnest runtime has no contracts DLL.",
+                    contractsPath);
             }
+
+            // Load from bytes so every version can coexist in Corel's main
+            // AppDomain. This keeps COM access in that domain while allowing
+            // the gateway implementation to change with a hot-reloaded Runtime.
+            Assembly contracts = Assembly.Load(File.ReadAllBytes(contractsPath));
+            Type gatewayType = contracts.GetType(
+                "CorelDeepnest.Contracts.CorelGateway", true);
+            return Activator.CreateInstance(gatewayType, new object[] { app });
         }
 
         private static string TryWriteErrorLog(Exception error)

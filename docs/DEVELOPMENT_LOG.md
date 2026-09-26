@@ -1282,3 +1282,146 @@ false). Логика ошибок worker сохранена (guard из прош
 
 Остаётся: несколько **разных** sheet types в одном job (стратегия выбора
 ресурса), depth>1 islands, geometry→SVG renderer, CLI, native ABI.
+
+---
+
+## 2026-09-27 — CorelDRAW addon: usable nesting workflow
+
+### Goal
+
+Зафиксировать фактически работающий путь от выделения в CorelDRAW до
+применения найденной раскладки и отделить его от следующей задачи по поддержке
+произвольной векторной геометрии.
+
+### Verified environment and package
+
+- CorelDRAW 2025, версия `26.1.0.143`.
+- C# VSTA addon на .NET Framework 4.8.
+- Входные команды: `TestDeepnestConnection` и `NestSelectedShapes`.
+- Сборка создаётся из неизменённого Corel VSTA template и публикуется в
+  `corel_addon/dist/CorelDeepnest.CGSaddon`.
+- Runtime и Contracts встроены в пакет; абсолютные пути компьютера сборки в
+  пакет не попадают.
+
+### Working architecture
+
+```text
+CorelDRAW / VSTA loader
+  -> CorelGateway in the main AppDomain
+  -> JSON and primitive values
+  -> versioned Runtime in a temporary AppDomain
+  -> HttpClient
+  -> Deepnest Server /api/v1
+```
+
+`CorelGateway` удерживает Corel COM objects в основном `AppDomain`. Это устранило
+ошибку сериализации `System.Dynamic.IDispatchComObject`. Runtime и Gateway
+implementation публикуются в уникальный каталог
+`%LOCALAPPDATA%/CorelDeepnest/Runtime/<build-id>`; `current.txt` атомарно
+переключается на новую версию.
+
+Обычные изменения `VstaMacro.cs`, Runtime или Contracts применяются следующим
+запуском команды после сборки и закрытия формы. Перезагрузка CorelDRAW нужна при
+изменении стабильного `VstaLoader.cs` или списка VSTA entry points.
+
+### What works
+
+- `GET /health` из CorelDRAW через стандартный `HttpClient`.
+- Чтение нескольких выбранных Curve shapes.
+- Перевод координат документа Corel в миллиметры и нормализация каждой детали
+  в локальную систему координат.
+- `POST /api/v1/jobs` с geometry DTO и стабильными `partId`.
+- Опрос `/result` каждые 200 мс.
+- Продолжение поиска после `placementComplete=true`; это поле означает полное
+  размещение текущего результата, а не окончание генетического поиска.
+- Обновление preview только при публикации нового результата, включая более
+  качественные варианты.
+- Ручной **Stop** и автоматический limit в секундах.
+- Отображение fitness, количества деталей, количества листов и raw JSON.
+- Preview нескольких `sheetInstanceId`; листы располагаются слева направо с
+  промежутком 20 мм.
+- Компактные подписи `#1`, `#2`, ... около центра детали, без градусов.
+- **Apply to CorelDRAW**: новый слой `Deepnest Result HHmmss`, прямоугольники
+  использованных листов, duplicate/rotate/move исходных объектов.
+- Исходные объекты не меняются; применение результата является одной Corel undo
+  operation.
+- Сохранение полей формы в `%LOCALAPPDATA%/CorelDeepnest/settings.json`.
+
+### Form and engine settings
+
+Основная строка содержит ширину и высоту листа, spacing и число rotations.
+Раскрываемая строка **Settings** содержит placement type, population size,
+mutation rate, threads, curve tolerance, shared-line weight, merge lines и time
+limit. Значение time limit `0` сохраняет ручной режим остановки.
+
+### Geometry extraction v2
+
+Реализован следующий pipeline:
+
+```text
+Shape.DisplayCurve.GetCopy()
+  -> closed SubPaths
+  -> polygon flattening
+  -> containment tree
+  -> outer contour + direct holes as PolygonDTO
+  -> split disconnected solids and nested islands into separate parts
+```
+
+Corel отвечает за `DisplayCurve` и преобразование SubPath в polyline. Addon
+удаляет последовательные дубли и коллинеарные точки, проверяет контуры и строит
+дерево вложенности без зависимости от winding. Сервер получает только готовые
+polygon trees.
+
+Поддержаны прямоугольники, эллипсы, полигоны и Curve shapes, включая Bezier,
+несколько внешних контуров, непосредственные отверстия и острова. Каждый
+even-depth solid становится отдельным `part-N`; его direct odd-depth children
+становятся `PolygonDTO.children`. Поэтому несвязанные solids и остров внутри
+отверстия могут размещаться независимо.
+
+При Apply создаётся отдельная Corel Curve из сохранённых исходных SubPath.
+Сервер использует полигональную аппроксимацию, но результат в Corel сохраняет
+исходные Bezier segments. Fill и outline копируются с исходного Shape.
+
+В Settings добавлен `Curve detail` (`1..100`, default `50`), который передаётся
+в Corel `SubPath.GetPolyline`. Значение сохраняется в `settings.json`.
+
+Открытые, вырожденные, самопересекающиеся, касающиеся и пересекающиеся контуры
+отклоняются с номером Shape/contour. Один контур ограничен 10 000 точек.
+Автоматического weld/repair нет.
+
+Проекты Contracts и Runtime успешно собраны, новая версия опубликована в
+versioned runtime directory и `dist/CorelDeepnest.CGSaddon`. Runtime-проверка
+новых типов фигур в CorelDRAW остаётся ручным acceptance test.
+
+### Rigid Corel groups
+
+Добавлена рекурсивная обработка `Shape.Shapes` для Corel group и nested groups.
+Каждый leaf извлекается через тот же `DisplayCurve -> GetPolyline` pipeline.
+Выбранная группа остаётся одним `part-N`; при Apply дублируется исходный Group,
+поэтому взаимное положение, исходные кривые и оформление дочерних Shape не
+изменяются.
+
+Текущий server DTO и engine имеют один root polygon на part. Поэтому временный
+безопасный nesting proxy группы — convex hull всех точек дочерних контуров.
+Пустоты между несвязанными островами считаются занятыми: это снижает плотность,
+но исключает пересечения. Для точного использования таких пустот потребуется
+отдельный server milestone с rigid `MultiPolygon` и NFP по всем компонентам.
+
+Contracts и Runtime после изменения успешно собраны; новая версия опубликована
+в versioned runtime и `dist/CorelDeepnest.CGSaddon`.
+
+### Files changed in the addon stage
+
+- `corel_addon/VstaLoader.cs` — стабильные VSTA entry points и загрузка текущей
+  версии Runtime/Contracts.
+- `corel_addon/VstaMacro.cs` — HTTP client, job lifecycle, WinForms, preview,
+  настройки и команда применения результата.
+- `corel_addon/Contracts/ICorelGateway.cs` — сериализуемая граница вызовов.
+- `corel_addon/Contracts/CorelGateway.cs` — чтение selection и применение
+  placements через Corel Object Model.
+- `corel_addon/Contracts/GeometryExtraction.cs` — DisplayCurve extraction,
+  polygonization, validation, topology и decomposition.
+- `corel_addon/build-addon.ps1` — сборка, упаковка, versioned runtime и безопасная
+  очистка Corel/VSTA cache при закрытом CorelDRAW.
+- `corel_addon/README.md`, `corel_addon/BUILD.md` — пользовательский сценарий,
+  сборка, reload, ограничения и troubleshooting.

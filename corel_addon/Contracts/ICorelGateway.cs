@@ -2,6 +2,7 @@ namespace CorelDeepnest.Contracts
 {
     public interface ICorelGateway
     {
-        string CaptureSelectionJson();
+        string CaptureSelectionJson(int curvePrecision);
+        string Invoke(string operation, string payload);
     }
 }
