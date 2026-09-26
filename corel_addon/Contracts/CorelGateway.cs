@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Web.Script.Serialization;
 
 namespace CorelDeepnest.Contracts
@@ -116,8 +117,7 @@ namespace CorelDeepnest.Contracts
                 temporaryDocument = source.CreateDocumentFrom(true);
                 temporaryDocument.Activate();
                 ConvertTextToCurves(temporaryDocument.ActivePage.Shapes);
-                exportFilter = temporaryDocument.ExportEx(
-                    path, SvgFilter, CurrentPageExport);
+                exportFilter = ExportSvg(temporaryDocument, path);
                 exportFilter.Finish();
                 exportFilter = null;
 
@@ -158,6 +158,48 @@ namespace CorelDeepnest.Contracts
                 {
                 }
             }
+        }
+
+        private static object ExportSvg(object document, string path)
+        {
+            Type documentType = FindCorelInteropType(
+                "Corel.Interop.VGCore.IVGDocument");
+            MethodInfo exportEx = documentType.GetMethod("ExportEx");
+            if (exportEx == null)
+            {
+                throw new MissingMethodException(documentType.FullName, "ExportEx");
+            }
+
+            object svgFilter = Enum.ToObject(
+                FindCorelInteropType("Corel.Interop.VGCore.cdrFilter"),
+                SvgFilter);
+            object currentPage = Enum.ToObject(
+                FindCorelInteropType("Corel.Interop.VGCore.cdrExportRange"),
+                CurrentPageExport);
+
+            return exportEx.Invoke(document, new object[]
+            {
+                path,
+                svgFilter,
+                currentPage,
+                Type.Missing,
+                Type.Missing
+            });
+        }
+
+        private static Type FindCorelInteropType(string fullName)
+        {
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+
+            throw new TypeLoadException(
+                "CorelDRAW interop type is not loaded: " + fullName);
         }
 
         private static void SaveDiagnosticSvg(string partId, string svg)
