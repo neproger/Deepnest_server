@@ -9,45 +9,25 @@ namespace CorelDeepnest.Contracts
     public sealed class CorelGateway : MarshalByRefObject, ICorelGateway
     {
         private const int MillimeterUnit = 3;
-        private const int CopyShapeAppearance = 1 | 2 | 4;
         private const int SvgFilter = 1345;
         private const int SelectionExport = 2;
         private const int GroupShapeType = 7;
         private const int TextShapeType = 6;
         private readonly dynamic application;
         private static readonly JavaScriptSerializer Json = CreateJsonSerializer();
-        private readonly Dictionary<string, ExtractedPart> capturedParts =
-            new Dictionary<string, ExtractedPart>(StringComparer.Ordinal);
+        private sealed class CapturedPart
+        {
+            internal object SourceShape;
+            internal double OriginX;
+            internal double OriginY;
+        }
+
+        private readonly Dictionary<string, CapturedPart> capturedParts =
+            new Dictionary<string, CapturedPart>(StringComparer.Ordinal);
 
         public CorelGateway(object application)
         {
             this.application = application;
-        }
-
-        public string CaptureSelectionJson(int curvePrecision)
-        {
-            List<ExtractedPart> extracted =
-                new GeometryExtractor(application, curvePrecision).ExtractSelection();
-            var parts = new List<object>();
-            capturedParts.Clear();
-            foreach (ExtractedPart part in extracted)
-            {
-                capturedParts.Add(part.Id, part);
-                parts.Add(new Dictionary<string, object>
-                {
-                    { "id", part.Id },
-                    { "polygontree", part.PolygonTree },
-                    { "geometryMode", part.DuplicateSource
-                        ? "group-convex-hull"
-                        : "display-curve" }
-                });
-            }
-
-            return Json.Serialize(new Dictionary<string, object>
-            {
-                { "curvePrecision", curvePrecision },
-                { "parts", parts.ToArray() }
-            });
         }
 
         public string CaptureSelectionSvgJson()
@@ -74,19 +54,16 @@ namespace CorelDeepnest.Contracts
                 dynamic source = sourceShapes[index];
                 string partId = "part-" + (index + 1);
                 string svg = ExportShapeSvg(source, document, partId);
-                capturedParts.Add(partId, new ExtractedPart
+                capturedParts.Add(partId, new CapturedPart
                 {
-                    Id = partId,
                     SourceShape = source,
-                    DuplicateSource = true,
                     OriginX = Convert.ToDouble(source.LeftX),
                     OriginY = Convert.ToDouble(source.BottomY)
                 });
                 parts.Add(new Dictionary<string, object>
                 {
                     { "id", partId },
-                    { "data", svg },
-                    { "geometryMode", "corel-svg" }
+                    { "data", svg }
                 });
             }
 
@@ -305,7 +282,7 @@ namespace CorelDeepnest.Contracts
                             "Placement has an invalid sheetInstanceId.");
                     }
 
-                    ExtractedPart captured;
+                    CapturedPart captured;
                     if (!capturedParts.TryGetValue(partId, out captured))
                     {
                         throw new InvalidOperationException(
@@ -322,18 +299,8 @@ namespace CorelDeepnest.Contracts
                     double targetY = sheetBottom + application.ConvertUnits(
                         y, MillimeterUnit, documentUnit);
 
-                    dynamic copy;
-                    if (captured.DuplicateSource)
-                    {
-                        copy = ((dynamic)captured.SourceShape).Duplicate(0.0, 0.0);
-                        copy.MoveToLayer(layer);
-                    }
-                    else
-                    {
-                        copy = layer.CreateCurve(((dynamic)captured.Curve).GetCopy());
-                        copy.CopyPropertiesFrom(
-                            (dynamic)captured.SourceShape, CopyShapeAppearance);
-                    }
+                    dynamic copy = ((dynamic)captured.SourceShape).Duplicate(0.0, 0.0);
+                    copy.MoveToLayer(layer);
                     copy.RotateEx(rotation, captured.OriginX, captured.OriginY);
                     copy.Move(
                         targetX - captured.OriginX,

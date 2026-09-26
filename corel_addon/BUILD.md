@@ -10,7 +10,7 @@ from scratch.
 CorelDRAW 2025
   -> stable Corel VSTA loader (.CGSaddon)
   -> CorelGateway (COM access in Corel's main AppDomain)
-  -> serializable JSON geometry
+  -> temporary Corel SVG exports
   -> temporary .NET Framework AppDomain
   -> versioned CorelDeepnest.Runtime DLL
   -> HttpClient
@@ -20,11 +20,11 @@ CorelDRAW 2025
 The following path has been tested successfully:
 
 ```text
-selected Corel Curve shapes
-  -> PolygonDTO JSON
+selected Corel shapes
+  -> SVG through Corel ExportEx
   -> POST /api/v1/jobs
   -> poll /api/v1/jobs/{jobId}/result
-  -> placement preview and raw JSON displayed in WinForms
+  -> placement preview displayed in WinForms
   -> duplicate, rotate, and move shapes on a new Corel layer
 ```
 
@@ -208,27 +208,22 @@ files derived from the same template simultaneously: they share a project ID.
 `NestSelectedShapes` currently:
 
 - reads the active Corel selection;
-- obtains non-destructive geometry from `Shape.DisplayCurve.GetCopy()`;
-- accepts rectangles, ellipses, polygons, and Curve shapes when Corel exposes a
-  usable display curve;
-- converts Bezier contours to polygons through `SubPath.GetPolyline`;
-- requires every subpath to be closed and geometrically valid;
-- determines outer contours and holes by containment, independently of winding;
-- sends direct holes through `PolygonDTO.children`;
-- splits disconnected outer contours and even-depth islands into independent
-  parts because one server part has one root polygon;
-- walks nested Corel groups recursively and treats each selected group as one
-  rigid part using a conservative convex hull;
+- copies each selected top-level Shape or Group to a temporary document;
+- converts text to curves in that temporary document;
+- exports the selection through Corel's SVG filter;
+- sends the SVG through the public `format: svg` job input;
+- relies on the original Deepnest `load -> clean -> getParts` pipeline for
+  curve flattening, contour containment, holes, and independent roots;
 - creates a rectangular sheet from the form values;
-- submits one part per selected shape;
 - draws the returned placements on a sheet preview;
-- polls the result every 200 ms and refreshes the preview and raw JSON when the
-  server publishes a better result;
+- polls the result every 200 ms and refreshes the preview when the server
+  publishes a better result;
 - draws compact centered labels (`#1`, `#2`, ...) without rotation text;
 - keeps searching after `placementComplete=true`, because that flag describes
   placement coverage rather than the genetic-search lifecycle;
 - lets the user stop the search and accept the latest best result;
-- enables `Apply to CorelDRAW` after a successful result;
+- enables `Apply to CorelDRAW` when every selected Corel object produced one
+  Deepnest outer root;
 - creates a new result layer and a rectangular sheet on the active page;
 - supports multiple `sheetInstanceId` values and arranges their sheets from
   left to right with a 20 mm gap;
@@ -236,9 +231,8 @@ files derived from the same template simultaneously: they share a project ID.
 - leaves the source objects unchanged;
 - groups the complete application operation into one undo step.
 
-Sheet width, height, and spacing are millimeters. Selected-shape coordinates
-are converted from the active document unit to millimeters and normalized to a
-local origin before submission.
+Sheet width, height, and spacing are millimeters. The request uses SVG units in
+millimeters with scale `25.4`.
 
 Form values and the Corel-relevant engine settings are persisted in
 `%LOCALAPPDATA%\CorelDeepnest\settings.json`. The settings file is independent
@@ -246,20 +240,15 @@ of Runtime build directories, so hot reload and package updates retain the last
 values entered by the user.
 
 The persisted fields are sheet width and height, spacing, rotation count,
-placement strategy, population size, mutation rate, worker count, Corel curve
-detail, geometry tolerance, shared-line weight, shared-line detection, and
-automatic time limit.
+placement strategy, population size, mutation rate, worker count, SVG curve
+tolerance, shared-line weight, shared-line detection, and automatic time
+limit. Obsolete direct-geometry settings are ignored.
 
-Corel curve detail is an integer from 1 to 100 and defaults to 50. Higher values
-produce more polygon points. The addon rejects open, degenerate,
-self-intersecting, touching, and crossing contours and limits one flattened
-contour to 10,000 points. It does not silently weld or repair input geometry.
-
-Groups are supported when every leaf exposes closed `DisplayCurve` contours. A
-group is applied by duplicating the complete source group; its nesting proxy is
-a convex hull, so gaps between disconnected members cannot currently receive
-other parts. PowerClip, text conversion, effects, and physical outline
-expansion still require explicit handling.
+Independent outer roots are separate parts, matching original Deepnest. If one
+Corel source object produces several roots, preview and nesting remain valid,
+but Apply is disabled because those roots no longer have a one-to-one source
+object mapping. Raster content is outside the nesting model. PowerClip and live
+effects depend on Corel's SVG export and require production testing.
 
 ## Known errors
 

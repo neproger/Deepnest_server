@@ -70,7 +70,6 @@ namespace CorelDeepnest.Runtime
 
         private sealed class JobRunResult
         {
-            public string Json;
             public PreviewModel Preview;
             public string JobStatus;
             public string UpdatedAt;
@@ -89,13 +88,11 @@ namespace CorelDeepnest.Runtime
             public int PopulationSize;
             public int MutationRate;
             public int Threads;
-            public int CorelCurvePrecision;
             public string PlacementType;
             public bool MergeLines;
             public double CurveTolerance;
             public double TimeRatio;
             public int TimeLimitSeconds;
-            public bool UseSvgInput;
         }
 
         public void Execute(string command, ICorelGateway gateway)
@@ -276,86 +273,6 @@ namespace CorelDeepnest.Runtime
         private static Dictionary<string, object> BuildRequest(ICorelGateway gateway,
             NestingOptions options, out List<PreviewPart> previewParts)
         {
-            if (options.UseSvgInput)
-            {
-                return BuildSvgRequest(gateway, options, out previewParts);
-            }
-
-            var selection = Json.Deserialize<Dictionary<string, object>>(
-                gateway.CaptureSelectionJson(options.CorelCurvePrecision));
-            var parts = new List<object>();
-            previewParts = new List<PreviewPart>();
-            foreach (object partValue in (System.Collections.IEnumerable)selection["parts"])
-            {
-                var capturedPart = (Dictionary<string, object>)partValue;
-                string partId = Convert.ToString(capturedPart["id"]);
-                var polygonTree = (Dictionary<string, object>)capturedPart["polygontree"];
-
-                parts.Add(new Dictionary<string, object>
-                {
-                    { "id", partId },
-                    { "quantity", 1 },
-                    { "polygontree", polygonTree }
-                });
-                previewParts.Add(ParsePreviewPart(partId, polygonTree));
-            }
-
-            object[] sheetPoints =
-            {
-                Point(0, 0),
-                Point(options.SheetWidth, 0),
-                Point(options.SheetWidth, options.SheetHeight),
-                Point(0, options.SheetHeight)
-            };
-
-            var sheet = new Dictionary<string, object>
-            {
-                { "id", "sheet-1" },
-                { "quantity", 1 },
-                { "mode", "auto" },
-                { "polygontree", Polygon(sheetPoints) }
-            };
-
-            var input = new Dictionary<string, object>
-            {
-                { "format", "geometry" },
-                { "units", "mm" },
-                { "sheets", new object[] { sheet } },
-                { "parts", parts.ToArray() }
-            };
-
-            var config = new Dictionary<string, object>
-            {
-                { "spacing", options.Spacing },
-                { "rotations", options.Rotations },
-                { "populationSize", options.PopulationSize },
-                { "mutationRate", options.MutationRate },
-                { "threads", options.Threads },
-                { "placementType", options.PlacementType },
-                { "mergeLines", options.MergeLines },
-                { "curveTolerance", options.CurveTolerance },
-                { "timeRatio", options.TimeRatio }
-            };
-
-            var request = new Dictionary<string, object>
-            {
-                { "input", input },
-                { "config", config }
-            };
-            if (options.TimeLimitSeconds > 0)
-            {
-                request.Add("execution", new Dictionary<string, object>
-                {
-                    { "timeLimitMs", options.TimeLimitSeconds * 1000 }
-                });
-            }
-            return request;
-        }
-
-        private static Dictionary<string, object> BuildSvgRequest(
-            ICorelGateway gateway, NestingOptions options,
-            out List<PreviewPart> previewParts)
-        {
             var selection = Json.Deserialize<Dictionary<string, object>>(
                 gateway.CaptureSelectionSvgJson());
             var parts = new List<object>();
@@ -480,20 +397,6 @@ namespace CorelDeepnest.Runtime
             return points;
         }
 
-        private static Dictionary<string, object> Point(double x, double y)
-        {
-            return new Dictionary<string, object> { { "x", x }, { "y", y } };
-        }
-
-        private static Dictionary<string, object> Polygon(object[] points)
-        {
-            return new Dictionary<string, object>
-            {
-                { "points", points },
-                { "children", new object[0] }
-            };
-        }
-
         private static PreviewModel ParsePreview(string json, double sheetWidth,
             double sheetHeight, List<PreviewPart> parts)
         {
@@ -591,7 +494,6 @@ namespace CorelDeepnest.Runtime
             }
             return new JobRunResult
             {
-                Json = json,
                 Preview = ParsePreview(json, sheetWidth, sheetHeight, parts),
                 JobStatus = root.ContainsKey("jobStatus")
                     ? Convert.ToString(root["jobStatus"])
@@ -659,12 +561,10 @@ namespace CorelDeepnest.Runtime
             private readonly NumericUpDown populationSize = NumberInput(10, 0);
             private readonly NumericUpDown mutationRate = NumberInput(10, 0);
             private readonly NumericUpDown threads = NumberInput(4, 0);
-            private readonly NumericUpDown corelCurvePrecision = NumberInput(50, 0);
             private readonly NumericUpDown curveTolerance = NumberInput(0.72M, 3);
             private readonly NumericUpDown timeRatio = NumberInput(0.5M, 2);
             private readonly NumericUpDown timeLimitSeconds = NumberInput(0, 0);
             private readonly ComboBox placementType = new ComboBox();
-            private readonly ComboBox inputFormat = new ComboBox();
             private readonly CheckBox mergeLines = new CheckBox();
             private readonly ToolTip help = new ToolTip();
             private readonly Button run = new Button();
@@ -687,8 +587,6 @@ namespace CorelDeepnest.Runtime
                 mutationRate.Maximum = 100;
                 threads.Minimum = 1;
                 threads.Maximum = 8;
-                corelCurvePrecision.Minimum = 1;
-                corelCurvePrecision.Maximum = 100;
                 curveTolerance.Minimum = 0.001M;
                 curveTolerance.Maximum = 100;
                 curveTolerance.Increment = 0.01M;
@@ -702,13 +600,6 @@ namespace CorelDeepnest.Runtime
                 });
                 placementType.SelectedIndex = 0;
                 placementType.Width = 100;
-                inputFormat.DropDownStyle = ComboBoxStyle.DropDownList;
-                inputFormat.Items.AddRange(new object[]
-                {
-                    "Geometry (COM)", "SVG (experimental)"
-                });
-                inputFormat.SelectedIndex = 1;
-                inputFormat.Width = 130;
                 mergeLines.Text = "Merge lines";
                 mergeLines.Checked = true;
                 mergeLines.AutoSize = true;
@@ -742,11 +633,9 @@ namespace CorelDeepnest.Runtime
                     BackColor = DrawingColor.FromArgb(242, 242, 242)
                 };
                 AddField(advancedFields, "Placement", placementType);
-                AddField(advancedFields, "Input", inputFormat);
                 AddField(advancedFields, "Population", populationSize);
                 AddField(advancedFields, "Mutation, %", mutationRate);
                 AddField(advancedFields, "Threads", threads);
-                AddField(advancedFields, "Curve detail", corelCurvePrecision);
                 AddField(advancedFields, "Tolerance, mm", curveTolerance);
                 AddField(advancedFields, "Line weight", timeRatio);
                 AddField(advancedFields, "Limit, sec", timeLimitSeconds);
@@ -754,13 +643,9 @@ namespace CorelDeepnest.Runtime
 
                 help.SetToolTip(placementType,
                     "gravity favors compact width; box minimizes bounding-box area; convexhull minimizes hull area.");
-                help.SetToolTip(inputFormat,
-                    "SVG lets Corel export rendered geometry and lets the server flatten it. Geometry uses direct COM extraction.");
                 help.SetToolTip(populationSize, "Genetic population size. Larger values explore more candidates.");
                 help.SetToolTip(mutationRate, "Mutation probability in percent.");
                 help.SetToolTip(threads, "Worker count, from 1 to 8.");
-                help.SetToolTip(corelCurvePrecision,
-                    "Corel curve-to-polyline precision, from 1 to 100. Higher values create more points.");
                 help.SetToolTip(curveTolerance, "Geometry tolerance in millimeters.");
                 help.SetToolTip(timeRatio, "Weight of shared cutting-line length in fitness.");
                 help.SetToolTip(timeLimitSeconds, "0 means run until Stop; a positive value stops automatically.");
@@ -935,13 +820,11 @@ namespace CorelDeepnest.Runtime
                     PopulationSize = Convert.ToInt32(populationSize.Value),
                     MutationRate = Convert.ToInt32(mutationRate.Value),
                     Threads = Convert.ToInt32(threads.Value),
-                    CorelCurvePrecision = Convert.ToInt32(corelCurvePrecision.Value),
                     PlacementType = Convert.ToString(placementType.SelectedItem),
                     MergeLines = mergeLines.Checked,
                     CurveTolerance = Convert.ToDouble(curveTolerance.Value),
                     TimeRatio = Convert.ToDouble(timeRatio.Value),
-                    TimeLimitSeconds = Convert.ToInt32(timeLimitSeconds.Value),
-                    UseSvgInput = inputFormat.SelectedIndex == 1
+                    TimeLimitSeconds = Convert.ToInt32(timeLimitSeconds.Value)
                 };
             }
 
@@ -964,7 +847,6 @@ namespace CorelDeepnest.Runtime
                     SetNumber(values, "populationSize", populationSize);
                     SetNumber(values, "mutationRate", mutationRate);
                     SetNumber(values, "threads", threads);
-                    SetNumber(values, "corelCurvePrecision", corelCurvePrecision);
                     SetNumber(values, "curveTolerance", curveTolerance);
                     SetNumber(values, "timeRatio", timeRatio);
                     SetNumber(values, "timeLimitSeconds", timeLimitSeconds);
@@ -982,10 +864,6 @@ namespace CorelDeepnest.Runtime
                     if (values.TryGetValue("mergeLines", out value))
                     {
                         mergeLines.Checked = Convert.ToBoolean(value);
-                    }
-                    if (values.TryGetValue("inputFormat", out value))
-                    {
-                        inputFormat.SelectedIndex = Convert.ToString(value) == "svg" ? 1 : 0;
                     }
                 }
                 catch
@@ -1010,13 +888,11 @@ namespace CorelDeepnest.Runtime
                         { "populationSize", options.PopulationSize },
                         { "mutationRate", options.MutationRate },
                         { "threads", options.Threads },
-                        { "corelCurvePrecision", options.CorelCurvePrecision },
                         { "placementType", options.PlacementType },
                         { "mergeLines", options.MergeLines },
                         { "curveTolerance", options.CurveTolerance },
                         { "timeRatio", options.TimeRatio },
-                        { "timeLimitSeconds", options.TimeLimitSeconds },
-                        { "inputFormat", options.UseSvgInput ? "svg" : "geometry" }
+                        { "timeLimitSeconds", options.TimeLimitSeconds }
                     }));
                 }
                 catch

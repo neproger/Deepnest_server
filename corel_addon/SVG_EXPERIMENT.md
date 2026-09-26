@@ -1,7 +1,8 @@
-# Corel SVG input experiment
+# Corel SVG input
 
-This experiment lives on branch `experiment/corel-svg-input`. It keeps the
-direct COM geometry path available and adds an SVG path for side-by-side tests.
+This work lives on branch `experiment/corel-svg-input`. SVG export is now the
+only Corel geometry input path; the former direct `DisplayCurve` path was
+removed after side-by-side testing.
 
 ## Run
 
@@ -20,13 +21,11 @@ direct COM geometry path available and adds an SVG path for side-by-side tests.
    ```
 
 4. Run `NestSelectedShapes` again.
-5. Open **Settings** and choose either:
-   - `Geometry (COM)` for the existing `DisplayCurve` path;
-   - `SVG (experimental)` for Corel SVG export and server-side flattening.
+5. Select shapes and press **Run nesting**. Corel exports the temporary SVG and
+   the server performs its normal SVG import and flattening.
 
-The selected input mode is persisted in
-`%LOCALAPPDATA%\CorelDeepnest\settings.json`. SVG is the default on a clean
-settings file for this branch.
+Form settings are persisted in `%LOCALAPPDATA%\CorelDeepnest\settings.json`.
+Old `inputFormat` values are ignored.
 
 ## SVG path
 

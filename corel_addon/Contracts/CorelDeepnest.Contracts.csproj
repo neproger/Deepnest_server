@@ -21,7 +21,6 @@
   <ItemGroup>
     <Compile Include="ICorelGateway.cs" />
     <Compile Include="CorelGateway.cs" />
-    <Compile Include="GeometryExtraction.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
