@@ -1,3 +1,6 @@
-legacy_csharp/bin/
-legacy_csharp/obj/
-legacy_csharp/dist/
+bin/
+obj/
+**/bin/
+**/obj/
+dist/
+Runtime/GeneratedBuildInfo.cs

@@ -23,8 +23,9 @@ Corel Shape
 
 ## Current implementation
 
-The active client is the C# VSTA addon in `legacy_csharp/`. The directory keeps
-its historical name, but it is now the working integration path.
+The active client lives directly in this directory. A small C# VSTA loader
+stays loaded in CorelDRAW, while the form and integration code run from a
+replaceable .NET Framework Runtime DLL in a temporary `AppDomain`.
 
 It exposes two Corel commands:
 
@@ -32,10 +33,10 @@ It exposes two Corel commands:
   the response.
 - `NestSelectedShapes` opens a WinForms dialog, reads selected Corel Curve
   shapes, submits a geometry job, polls the result, and displays placements as
-  JSON.
+  a sheet preview and raw JSON. The dialog can stop a running job.
 
 The geometry path has been verified with two real selected Corel shapes. Both
-were placed successfully and one received a 270-degree rotation.
+were placed successfully, including rotated placements returned by the server.
 
 At this stage the addon reads the document but does not modify it. Applying
 placements through Duplicate/Rotate/Move is the next milestone.
@@ -51,22 +52,27 @@ npm start
 Build the addon:
 
 ```powershell
-cd corel_addon\legacy_csharp
+cd corel_addon
 .\build-addon.ps1
 ```
 
 Load this generated file from CorelDRAW's **Scripts** docker:
 
 ```text
-legacy_csharp\dist\CorelDeepnest.CGSaddon
+dist\CorelDeepnest.CGSaddon
 ```
 
-Unload the project before rebuilding, then load it again from `dist`. No copy
-of `CorelDeepnest.CGSaddon` should remain in Corel's roaming `CorelVSTA` folder,
-because Corel auto-loads that copy and can show stale commands.
+The generated `.CGSaddon` contains the bundled Runtime and Contracts DLLs and
+can be copied to another computer as one file. On first use the loader installs
+them under `%LOCALAPPDATA%\CorelDeepnest\Runtime`. Subsequent local builds
+publish a versioned directory containing the canonical DLL names; close the
+addon form, run the build, and invoke the command again without restarting
+CorelDRAW. This hot-reload loop was verified with two consecutive Runtime
+builds while CorelDRAW remained open. Reload the `.CGSaddon` only after changing
+`VstaLoader.cs` or the exposed command list.
 
 The complete verified setup, build, reload, troubleshooting, and package
-format notes are in [`legacy_csharp/BUILD.md`](legacy_csharp/BUILD.md).
+format notes are in [`BUILD.md`](BUILD.md).
 
 ## Current geometry constraints
 
@@ -77,7 +83,9 @@ Every selected part must currently be:
 - at least three nodes;
 - composed only of straight line segments.
 
-The sheet is a rectangle entered in the form. Sheet dimensions, spacing, and
-selected-shape coordinates use the current Corel document unit consistently.
+The sheet is a rectangle entered in the form. Sheet dimensions and spacing are
+millimeters; selected-shape coordinates are converted from the active Corel
+document unit to millimeters.
+
 Holes, multiple contours, groups, PowerClip, text conversion, curve flattening,
 and placement application are not implemented yet.
