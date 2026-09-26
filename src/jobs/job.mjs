@@ -22,6 +22,7 @@ export class Job {
     this.spec = spec;
     this.binId = spec.sheetId;
     this.sheetMap = null;
+    this.previewParts = [];
 
     this.status = "queued";
     this.createdAt = new Date().toISOString();
@@ -82,6 +83,7 @@ export class Job {
       );
       this.svgAvailable = Boolean(renderContext);
       this.sheetMap = buildSheetMap(geometry.sheets);
+      this.previewParts = buildPreviewParts(geometry.parts);
       this.abort = await nestWithRender(
         geometry,
         renderContext,
@@ -128,7 +130,10 @@ export class Job {
     }
     this.rawResult = data;
     this.svgFn = svg;
-    this.result = toExternalResult(data, status, this.sheetMap);
+    this.result = {
+      ...toExternalResult(data, status, this.sheetMap),
+      parts: this.previewParts,
+    };
     this.placementComplete = !!status.complete;
     this.resultUpdatedAt = new Date().toISOString();
     this.emit("result.updated", {
@@ -204,4 +209,24 @@ export class Job {
     this.emit("job.failed", { jobId: this.id, error: this.error });
     this.manager.onJobFinished(this);
   }
+}
+
+function buildPreviewParts(parts) {
+  const unique = new Map();
+  for (const part of parts) {
+    if (!unique.has(part.id)) {
+      unique.set(part.id, {
+        id: part.id,
+        polygontree: toPolygonDto(part.polygontree),
+      });
+    }
+  }
+  return [...unique.values()];
+}
+
+function toPolygonDto(polygon) {
+  return {
+    points: polygon.map(({ x, y }) => ({ x, y })),
+    children: (polygon.children || []).map(toPolygonDto),
+  };
 }

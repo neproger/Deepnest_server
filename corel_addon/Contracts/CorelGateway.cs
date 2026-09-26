@@ -11,7 +11,7 @@ namespace CorelDeepnest.Contracts
         private const int MillimeterUnit = 3;
         private const int CopyShapeAppearance = 1 | 2 | 4;
         private const int SvgFilter = 1345;
-        private const int CurrentPageExport = 1;
+        private const int SelectionExport = 2;
         private const int GroupShapeType = 7;
         private const int TextShapeType = 6;
         private readonly dynamic application;
@@ -117,6 +117,7 @@ namespace CorelDeepnest.Contracts
                 temporaryDocument = source.CreateDocumentFrom(true);
                 temporaryDocument.Activate();
                 ConvertTextToCurves(temporaryDocument.ActivePage.Shapes);
+                temporaryDocument.ActivePage.Shapes.All().CreateSelection();
                 exportFilter = ExportSvg(temporaryDocument, path);
                 exportFilter.Finish();
                 exportFilter = null;
@@ -173,9 +174,9 @@ namespace CorelDeepnest.Contracts
             object svgFilter = Enum.ToObject(
                 FindCorelInteropType("Corel.Interop.VGCore.cdrFilter"),
                 SvgFilter);
-            object currentPage = Enum.ToObject(
+            object selectionRange = Enum.ToObject(
                 FindCorelInteropType("Corel.Interop.VGCore.cdrExportRange"),
-                CurrentPageExport);
+                SelectionExport);
             object exportOptions = application.CreateStructExportOptions();
             object paletteOptions = application.CreateStructPaletteOptions();
 
@@ -183,7 +184,7 @@ namespace CorelDeepnest.Contracts
             {
                 path,
                 svgFilter,
-                currentPage,
+                selectionRange,
                 exportOptions,
                 paletteOptions
             });

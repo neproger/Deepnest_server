@@ -434,23 +434,33 @@ namespace CorelDeepnest.Runtime
             string partId, Dictionary<string, object> polygonTree)
         {
             var holes = new List<List<GeometryPoint>>();
-            object childrenValue;
-            if (polygonTree.TryGetValue("children", out childrenValue) &&
-                childrenValue != null)
-            {
-                foreach (object childValue in
-                    (System.Collections.IEnumerable)childrenValue)
-                {
-                    var child = (Dictionary<string, object>)childValue;
-                    holes.Add(ParseGeometryPoints(child["points"]));
-                }
-            }
+            CollectChildContours(polygonTree, holes);
             return new PreviewPart
             {
                 Id = partId,
                 Points = ParseGeometryPoints(polygonTree["points"]),
                 Holes = holes
             };
+        }
+
+        private static void CollectChildContours(
+            Dictionary<string, object> polygonTree,
+            List<List<GeometryPoint>> contours)
+        {
+            object childrenValue;
+            if (!polygonTree.TryGetValue("children", out childrenValue) ||
+                childrenValue == null)
+            {
+                return;
+            }
+
+            foreach (object childValue in
+                (System.Collections.IEnumerable)childrenValue)
+            {
+                var child = (Dictionary<string, object>)childValue;
+                contours.Add(ParseGeometryPoints(child["points"]));
+                CollectChildContours(child, contours);
+            }
         }
 
         private static List<GeometryPoint> ParseGeometryPoints(object pointsValue)
@@ -491,6 +501,18 @@ namespace CorelDeepnest.Runtime
             var placements = new List<PreviewPlacement>();
             int sheetCount = 1;
             object value;
+
+            if (parts.Count == 0 && root.TryGetValue("parts", out value) &&
+                value != null)
+            {
+                foreach (object item in (System.Collections.IEnumerable)value)
+                {
+                    var part = (Dictionary<string, object>)item;
+                    parts.Add(ParsePreviewPart(
+                        Convert.ToString(part["id"]),
+                        (Dictionary<string, object>)part["polygontree"]));
+                }
+            }
 
             if (root.TryGetValue("placements", out value))
             {

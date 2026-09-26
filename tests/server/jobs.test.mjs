@@ -527,6 +527,9 @@ test("SVG API keeps disconnected roots as one rigid part", async () => {
   });
   assert.equal(result.placements.length, 1);
   assert.equal(result.placements[0].partId, "rigid-group");
+  assert.equal(result.parts.length, 1);
+  assert.equal(result.parts[0].id, "rigid-group");
+  assert.ok(result.parts[0].polygontree.points.length >= 3);
 
   await fetch(`${base}/api/v1/jobs/${id}/stop`, { method: "POST" });
   await waitFor(async () => (await statusOf(id)) === "stopped");
