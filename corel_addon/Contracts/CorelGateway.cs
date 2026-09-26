@@ -160,7 +160,7 @@ namespace CorelDeepnest.Contracts
             }
         }
 
-        private static object ExportSvg(object document, string path)
+        private object ExportSvg(object document, string path)
         {
             Type documentType = FindCorelInteropType(
                 "Corel.Interop.VGCore.IVGDocument");
@@ -176,14 +176,16 @@ namespace CorelDeepnest.Contracts
             object currentPage = Enum.ToObject(
                 FindCorelInteropType("Corel.Interop.VGCore.cdrExportRange"),
                 CurrentPageExport);
+            object exportOptions = application.CreateStructExportOptions();
+            object paletteOptions = application.CreateStructPaletteOptions();
 
             return exportEx.Invoke(document, new object[]
             {
                 path,
                 svgFilter,
                 currentPage,
-                Type.Missing,
-                Type.Missing
+                exportOptions,
+                paletteOptions
             });
         }
 
