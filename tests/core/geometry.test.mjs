@@ -82,6 +82,35 @@ test("SVG parsing produces a plain polygon tree with a hole", async () => {
   assert.equal(part.quantity, 1);
 });
 
+test("one SVG input with disconnected roots remains one rigid part", async () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="10" height="10"/>
+    <rect x="30" y="0" width="10" height="10"/>
+  </svg>`;
+  const { geometry } = await parseSvgInput(
+    [{ file: "group-1", svg }],
+    {
+      bin: { width: 100, height: 100 },
+      units: "mm",
+      scale: 25.4,
+      preserveInputParts: true,
+    }
+  );
+
+  assert.equal(geometry.parts.length, 1);
+  assert.equal(geometry.parts[0].id, "group-1");
+  assert.deepEqual(
+    geometry.parts[0].polygontree.map(({ x, y }) => ({ x, y })),
+    [
+      { x: 0, y: 0 },
+      { x: 40, y: 0 },
+      { x: 40, y: 10 },
+      { x: 0, y: 10 },
+    ]
+  );
+  assert.deepEqual(geometry.parts[0].polygontree.children, []);
+});
+
 test("worker payload geometry is DOM-free with parallel metadata arrays", async () => {
   const binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
   const holeSvg = await readFile(path.resolve(fixtures, "part-hole.svg"), "utf8");

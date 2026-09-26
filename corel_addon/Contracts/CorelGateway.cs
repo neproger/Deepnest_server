@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Web.Script.Serialization;
 
 namespace CorelDeepnest.Contracts
@@ -8,8 +9,12 @@ namespace CorelDeepnest.Contracts
     {
         private const int MillimeterUnit = 3;
         private const int CopyShapeAppearance = 1 | 2 | 4;
+        private const int SvgFilter = 1345;
+        private const int CurrentPageExport = 1;
+        private const int GroupShapeType = 7;
+        private const int TextShapeType = 6;
         private readonly dynamic application;
-        private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+        private static readonly JavaScriptSerializer Json = CreateJsonSerializer();
         private readonly Dictionary<string, ExtractedPart> capturedParts =
             new Dictionary<string, ExtractedPart>(StringComparer.Ordinal);
 
@@ -42,6 +47,151 @@ namespace CorelDeepnest.Contracts
                 { "curvePrecision", curvePrecision },
                 { "parts", parts.ToArray() }
             });
+        }
+
+        public string CaptureSelectionSvgJson()
+        {
+            dynamic document = application.ActiveDocument;
+            dynamic selection = application.ActiveSelectionRange;
+            int shapeCount = Convert.ToInt32(selection.Count);
+            if (shapeCount == 0)
+            {
+                throw new InvalidOperationException(
+                    "Select one or more vector shapes first.");
+            }
+
+            var sourceShapes = new List<object>();
+            for (int index = 1; index <= shapeCount; index++)
+            {
+                sourceShapes.Add(selection.Shapes[index]);
+            }
+
+            capturedParts.Clear();
+            var parts = new List<object>();
+            for (int index = 0; index < sourceShapes.Count; index++)
+            {
+                dynamic source = sourceShapes[index];
+                string partId = "part-" + (index + 1);
+                string svg = ExportShapeSvg(source, document, partId);
+                capturedParts.Add(partId, new ExtractedPart
+                {
+                    Id = partId,
+                    SourceShape = source,
+                    DuplicateSource = true,
+                    OriginX = Convert.ToDouble(source.LeftX),
+                    OriginY = Convert.ToDouble(source.BottomY)
+                });
+                parts.Add(new Dictionary<string, object>
+                {
+                    { "id", partId },
+                    { "data", svg },
+                    { "geometryMode", "corel-svg" }
+                });
+            }
+
+            document.Activate();
+            document.ClearSelection();
+            foreach (dynamic source in sourceShapes)
+            {
+                source.AddToSelection();
+            }
+
+            return Json.Serialize(new Dictionary<string, object>
+            {
+                { "parts", parts.ToArray() }
+            });
+        }
+
+        private string ExportShapeSvg(dynamic source, dynamic sourceDocument,
+            string partId)
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "CorelDeepnest");
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(
+                directory, partId + "-" + Guid.NewGuid().ToString("N") + ".svg");
+            dynamic temporaryDocument = null;
+            dynamic exportFilter = null;
+            try
+            {
+                temporaryDocument = source.CreateDocumentFrom(true);
+                temporaryDocument.Activate();
+                ConvertTextToCurves(temporaryDocument.ActivePage.Shapes);
+                exportFilter = temporaryDocument.ExportEx(
+                    path, SvgFilter, CurrentPageExport);
+                exportFilter.Finish();
+                exportFilter = null;
+
+                if (!File.Exists(path))
+                {
+                    throw new InvalidOperationException(
+                        "CorelDRAW did not create SVG for " + partId + ".");
+                }
+                string svg = File.ReadAllText(path);
+                if (string.IsNullOrWhiteSpace(svg) ||
+                    svg.IndexOf("<svg", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    throw new InvalidOperationException(
+                        "CorelDRAW created an invalid SVG for " + partId + ".");
+                }
+                SaveDiagnosticSvg(partId, svg);
+                return svg;
+            }
+            finally
+            {
+                if (exportFilter != null)
+                {
+                    try { exportFilter.Finish(); } catch { }
+                }
+                if (temporaryDocument != null)
+                {
+                    try { temporaryDocument.Close(); } catch { }
+                }
+                try { sourceDocument.Activate(); } catch { }
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static void SaveDiagnosticSvg(string partId, string svg)
+        {
+            string directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CorelDeepnest", "SvgExport");
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, partId + ".svg"), svg);
+        }
+
+        private static JavaScriptSerializer CreateJsonSerializer()
+        {
+            var serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = 12 * 1024 * 1024;
+            return serializer;
+        }
+
+        private static void ConvertTextToCurves(dynamic shapes)
+        {
+            int count = Convert.ToInt32(shapes.Count);
+            for (int index = 1; index <= count; index++)
+            {
+                dynamic shape = shapes[index];
+                int type = Convert.ToInt32(shape.Type);
+                if (type == GroupShapeType)
+                {
+                    ConvertTextToCurves(shape.Shapes);
+                }
+                else if (type == TextShapeType)
+                {
+                    shape.ConvertToCurves();
+                }
+            }
         }
 
         public string Invoke(string operation, string payload)

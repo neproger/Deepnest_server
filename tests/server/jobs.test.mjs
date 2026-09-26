@@ -511,6 +511,27 @@ test("nests parts that contain holes", async () => {
   await deleteJob(id);
 });
 
+test("SVG API keeps disconnected roots as one rigid part", async () => {
+  const disconnected = `<svg xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="10" height="10"/>
+    <rect x="30" y="0" width="10" height="10"/>
+  </svg>`;
+  const created = (await createJob(
+    jobBody([{ id: "rigid-group", data: disconnected }])
+  )).json;
+  const id = created.jobId;
+
+  const result = await waitFor(async () => {
+    const response = await fetch(`${base}/api/v1/jobs/${id}/result`);
+    return response.status === 200 ? response.json() : false;
+  });
+  assert.equal(result.placements.length, 1);
+  assert.equal(result.placements[0].partId, "rigid-group");
+
+  await fetch(`${base}/api/v1/jobs/${id}/stop`, { method: "POST" });
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+});
+
 test("rejects reserved engine fields leaked through config", async () => {
   const withBin = await createJob(
     jobBody([{ id: "p", data: partSvg }], {
