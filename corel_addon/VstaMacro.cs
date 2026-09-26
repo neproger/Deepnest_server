@@ -667,7 +667,6 @@ namespace CorelDeepnest.Runtime
             private readonly ComboBox inputFormat = new ComboBox();
             private readonly CheckBox mergeLines = new CheckBox();
             private readonly ToolTip help = new ToolTip();
-            private readonly TextBox result = new TextBox();
             private readonly Button run = new Button();
             private readonly Button stop = new Button();
             private readonly Button apply = new Button();
@@ -813,22 +812,7 @@ namespace CorelDeepnest.Runtime
                 actions.Controls.Add(advancedButton);
                 actions.Controls.Add(status);
 
-                result.Dock = DockStyle.Fill;
-                result.Multiline = true;
-                result.ScrollBars = ScrollBars.Both;
-                result.WordWrap = false;
-                result.ReadOnly = true;
-
-                var split = new SplitContainer
-                {
-                    Dock = DockStyle.Fill,
-                    Orientation = Orientation.Horizontal,
-                    SplitterDistance = 380
-                };
-                split.Panel1.Controls.Add(preview);
-                split.Panel2.Controls.Add(result);
-
-                Controls.Add(split);
+                Controls.Add(preview);
                 Controls.Add(actions);
                 Controls.Add(advancedFields);
                 Controls.Add(fields);
@@ -845,7 +829,6 @@ namespace CorelDeepnest.Runtime
                 stopRequested = false;
                 completedResult = null;
                 preview.Model = null;
-                result.Text = "Creating nesting job...";
                 status.Text = "Creating nesting job...";
                 System.Windows.Forms.Application.DoEvents();
 
@@ -859,7 +842,6 @@ namespace CorelDeepnest.Runtime
                         delegate(string jobId) { status.Text = "Job " + jobId + " is running..."; },
                         UpdateRunningResult,
                         delegate { return stopRequested; });
-                    result.Text = jobResult.Json;
                     preview.Model = jobResult.Preview;
                     completedResult = jobResult;
                     apply.Enabled = jobResult.Preview.Placements.Count > 0 &&
@@ -873,8 +855,11 @@ namespace CorelDeepnest.Runtime
                 }
                 catch (Exception error)
                 {
-                    result.Text = "Deepnest job failed:" + Environment.NewLine + error.Message;
                     status.Text = error is OperationCanceledException ? "Job stopped." : "Job failed.";
+                    if (!(error is OperationCanceledException))
+                    {
+                        ShowError("Deepnest job failed", error);
+                    }
                 }
                 finally
                 {
@@ -885,7 +870,6 @@ namespace CorelDeepnest.Runtime
 
             private void UpdateRunningResult(JobRunResult jobResult)
             {
-                result.Text = jobResult.Json;
                 preview.Model = jobResult.Preview;
                 completedResult = jobResult;
                 status.Text = "Searching: best candidate " + jobResult.Index +
