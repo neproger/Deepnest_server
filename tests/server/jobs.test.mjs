@@ -511,7 +511,7 @@ test("nests parts that contain holes", async () => {
   await deleteJob(id);
 });
 
-test("SVG API keeps disconnected roots as one rigid part", async () => {
+test("SVG API exposes disconnected roots as original Deepnest parts", async () => {
   const disconnected = `<svg xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="10" height="10"/>
     <rect x="30" y="0" width="10" height="10"/>
@@ -525,11 +525,13 @@ test("SVG API keeps disconnected roots as one rigid part", async () => {
     const response = await fetch(`${base}/api/v1/jobs/${id}/result`);
     return response.status === 200 ? response.json() : false;
   });
-  assert.equal(result.placements.length, 1);
-  assert.equal(result.placements[0].partId, "rigid-group");
-  assert.equal(result.parts.length, 1);
-  assert.equal(result.parts[0].id, "rigid-group");
-  assert.ok(result.parts[0].polygontree.points.length >= 3);
+  assert.equal(result.placements.length, 2);
+  assert.deepEqual(result.placements.map((part) => part.partId).sort(), [
+    "rigid-group#1",
+    "rigid-group#2",
+  ]);
+  assert.equal(result.parts.length, 2);
+  assert.ok(result.parts.every((part) => part.polygontree.points.length >= 3));
 
   await fetch(`${base}/api/v1/jobs/${id}/stop`, { method: "POST" });
   await waitFor(async () => (await statusOf(id)) === "stopped");

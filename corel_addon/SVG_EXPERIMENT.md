@@ -45,22 +45,23 @@ For diagnostics the last export of every selected part is retained at:
 %LOCALAPPDATA%\CorelDeepnest\SvgExport\part-N.svg
 ```
 
-The server now preserves the public API rule that one `input.parts[]` element
-is one rigid part. A single SVG root polygon keeps its holes. If an exported SVG
-contains several disconnected root polygons, the experiment uses their convex
-hull as a safe rigid proxy. The older programmatic `nest()` API keeps its
-previous behavior of treating roots independently.
+The server passes every SVG through the original Deepnest import pipeline:
+`load -> clean -> getParts`. A root polygon keeps its nested contours as holes.
+Every disconnected outer root becomes an independent nesting part, matching
+the behavior of the original Deepnest UI. When one Corel export produces more
+than one root, stable result ids use `part-N#1`, `part-N#2`, and so on.
 
 ## Current limitations
 
-- SVG mode does not yet draw source outlines in the WinForms preview. Sheets,
-  placement count, status, fitness, and raw JSON remain available; **Apply to
-  CorelDRAW** duplicates the original Shape or Group.
+- SVG mode draws the polygon trees produced by the server in the WinForms
+  preview.
 - The Corel exporter and server parser must be tested for coordinate origin,
   rotation direction, physical dimensions, text, PowerClip, and effects.
 - Raster `<image>` content is outside the nesting geometry model.
-- Disconnected group components use a convex hull until rigid MultiPolygon is
-  implemented in the engine.
+- **Apply to CorelDRAW** is disabled when one selected Corel shape produces
+  several disconnected outer roots. Original Deepnest treats those roots as
+  separate physical parts; mapping them back requires splitting the source
+  Corel object first. Single-root shapes can still be applied.
 
 ## Comparison matrix
 

@@ -77,6 +77,7 @@ namespace CorelDeepnest.Runtime
             public double Fitness;
             public int Index;
             public bool Better;
+            public bool CanApply;
         }
 
         private sealed class NestingOptions
@@ -564,6 +565,7 @@ namespace CorelDeepnest.Runtime
         {
             var root = Json.Deserialize<Dictionary<string, object>>(json);
             bool better = true;
+            bool canApply = true;
             object statusValue;
             if (root.TryGetValue("status", out statusValue) && statusValue != null)
             {
@@ -572,6 +574,19 @@ namespace CorelDeepnest.Runtime
                 if (resultStatus.TryGetValue("better", out betterValue))
                 {
                     better = Convert.ToBoolean(betterValue);
+                }
+            }
+            object partsValue;
+            if (root.TryGetValue("parts", out partsValue) && partsValue != null)
+            {
+                foreach (object item in (System.Collections.IEnumerable)partsValue)
+                {
+                    var part = (Dictionary<string, object>)item;
+                    if (Convert.ToString(part["id"]).IndexOf('#') >= 0)
+                    {
+                        canApply = false;
+                        break;
+                    }
                 }
             }
             return new JobRunResult
@@ -590,7 +605,8 @@ namespace CorelDeepnest.Runtime
                 Index = root.ContainsKey("index")
                     ? Convert.ToInt32(root["index"])
                     : 0,
-                Better = better
+                Better = better,
+                CanApply = canApply
             };
         }
 
@@ -846,10 +862,14 @@ namespace CorelDeepnest.Runtime
                     result.Text = jobResult.Json;
                     preview.Model = jobResult.Preview;
                     completedResult = jobResult;
-                    apply.Enabled = jobResult.Preview.Placements.Count > 0;
+                    apply.Enabled = jobResult.Preview.Placements.Count > 0 &&
+                        jobResult.CanApply;
                     status.Text = "Best placement accepted: " +
                         jobResult.Preview.Placements.Count + " part(s) on " +
-                        jobResult.Preview.SheetCount + " sheet(s).";
+                        jobResult.Preview.SheetCount + " sheet(s)." +
+                        (jobResult.CanApply ? string.Empty :
+                            " Apply is unavailable because Corel shape contains " +
+                            "separate outer contours.");
                 }
                 catch (Exception error)
                 {
@@ -1236,7 +1256,7 @@ namespace CorelDeepnest.Runtime
                 const string prefix = "part-";
                 return partId != null && partId.StartsWith(
                     prefix, StringComparison.OrdinalIgnoreCase)
-                    ? "#" + partId.Substring(prefix.Length)
+                    ? "#" + partId.Substring(prefix.Length).Replace("#", ".")
                     : partId;
             }
         }

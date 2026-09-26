@@ -82,7 +82,7 @@ test("SVG parsing produces a plain polygon tree with a hole", async () => {
   assert.equal(part.quantity, 1);
 });
 
-test("one SVG input with disconnected roots remains one rigid part", async () => {
+test("one SVG input follows original Deepnest root-to-part behavior", async () => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="10" height="10"/>
     <rect x="30" y="0" width="10" height="10"/>
@@ -93,22 +93,32 @@ test("one SVG input with disconnected roots remains one rigid part", async () =>
       bin: { width: 100, height: 100 },
       units: "mm",
       scale: 25.4,
-      preserveInputParts: true,
     }
   );
 
-  assert.equal(geometry.parts.length, 1);
-  assert.equal(geometry.parts[0].id, "group-1");
+  assert.equal(geometry.parts.length, 2);
+  assert.deepEqual(geometry.parts.map((part) => part.id), [
+    "group-1#1",
+    "group-1#2",
+  ]);
   assert.deepEqual(
     geometry.parts[0].polygontree.map(({ x, y }) => ({ x, y })),
     [
-      { x: 0, y: 0 },
-      { x: 40, y: 0 },
-      { x: 40, y: 10 },
+      { x: 10, y: 10 },
       { x: 0, y: 10 },
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
     ]
   );
-  assert.deepEqual(geometry.parts[0].polygontree.children, []);
+  assert.deepEqual(
+    geometry.parts[1].polygontree.map(({ x, y }) => ({ x, y })),
+    [
+      { x: 40, y: 10 },
+      { x: 30, y: 10 },
+      { x: 30, y: 0 },
+      { x: 40, y: 0 },
+    ]
+  );
 });
 
 test("worker payload geometry is DOM-free with parallel metadata arrays", async () => {

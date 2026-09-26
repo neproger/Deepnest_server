@@ -280,7 +280,6 @@ export async function adaptInput(spec) {
     units,
     scale,
     sheetId: spec.sheetId,
-    preserveInputParts: true,
   });
   // Renderer is SVG-specific and loaded only on this path.
   const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
