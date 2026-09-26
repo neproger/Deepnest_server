@@ -70,6 +70,7 @@ namespace CorelDeepnest.Runtime
 
         private sealed class JobRunResult
         {
+            public string JobId;
             public PreviewModel Preview;
             public string JobStatus;
             public string UpdatedAt;
@@ -307,7 +308,8 @@ namespace CorelDeepnest.Runtime
                         { "bin", new Dictionary<string, object>
                             {
                                 { "id", "sheet-1" },
-                                { "data", binSvg }
+                                { "data", binSvg },
+                                { "mode", "auto" }
                             }
                         },
                         { "parts", parts.ToArray() }
@@ -492,6 +494,9 @@ namespace CorelDeepnest.Runtime
             }
             return new JobRunResult
             {
+                JobId = root.ContainsKey("jobId")
+                    ? Convert.ToString(root["jobId"])
+                    : string.Empty,
                 Preview = ParsePreview(json, sheetWidth, sheetHeight, parts),
                 JobStatus = root.ContainsKey("jobStatus")
                     ? Convert.ToString(root["jobStatus"])
@@ -727,14 +732,12 @@ namespace CorelDeepnest.Runtime
                         delegate { return stopRequested; });
                     preview.Model = jobResult.Preview;
                     completedResult = jobResult;
-                    apply.Enabled = jobResult.Preview.Placements.Count > 0 &&
-                        jobResult.CanApply;
+                    apply.Enabled = jobResult.Preview.Placements.Count > 0;
                     status.Text = "Best placement accepted: " +
                         jobResult.Preview.Placements.Count + " part(s) on " +
                         jobResult.Preview.SheetCount + " sheet(s)." +
                         (jobResult.CanApply ? string.Empty :
-                            " Apply is unavailable because Corel shape contains " +
-                            "separate outer contours.");
+                            " Separate contours will be imported from result SVG.");
                 }
                 catch (Exception error)
                 {
@@ -772,6 +775,30 @@ namespace CorelDeepnest.Runtime
                 apply.Enabled = false;
                 try
                 {
+                    if (!completedResult.CanApply)
+                    {
+                        string resultSvg = Send(
+                            "GET",
+                            "api/v1/jobs/" + completedResult.JobId + "/result.svg",
+                            null);
+                        string importedResponse = gateway.Invoke(
+                            "ImportNestingSvg",
+                            Json.Serialize(new Dictionary<string, object>
+                            {
+                                { "svg", resultSvg },
+                                { "placements", completedResult.Preview.Placements.Count },
+                                { "sheets", completedResult.Preview.SheetCount }
+                            }));
+                        var imported = Json.Deserialize<Dictionary<string, object>>(
+                            importedResponse);
+                        status.Text = "Imported " +
+                            Convert.ToInt32(imported["applied"]) +
+                            " part(s) on " + Convert.ToInt32(imported["sheets"]) +
+                            " sheet(s), layer " +
+                            Convert.ToString(imported["layer"]) + ".";
+                        return;
+                    }
+
                     var placements = new List<object>();
                     foreach (PreviewPlacement placement in completedResult.Preview.Placements)
                     {

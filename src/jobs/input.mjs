@@ -92,6 +92,23 @@ function validateSvgInput(input, config, execution) {
   }
   assertSvg(bin.data, "input.bin.data");
 
+  const mode = bin.mode === undefined ? "finite" : bin.mode;
+  if (mode !== "finite" && mode !== "auto") {
+    throw httpError(
+      400,
+      "INVALID_REQUEST",
+      'input.bin.mode must be "finite" or "auto"'
+    );
+  }
+  const quantity = bin.quantity === undefined ? 1 : bin.quantity;
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
+    throw httpError(
+      400,
+      "INVALID_REQUEST",
+      "input.bin.quantity must be an integer from 1 to 1000"
+    );
+  }
+
   if (!Array.isArray(input.parts) || input.parts.length === 0) {
     throw httpError(400, "INVALID_REQUEST", "`input.parts` must be a non-empty array");
   }
@@ -130,7 +147,7 @@ function validateSvgInput(input, config, execution) {
 
   return {
     format: "svg",
-    bin: { id: bin.id, data: bin.data },
+    bin: { id: bin.id, data: bin.data, mode, quantity },
     parts,
     config,
     execution,
@@ -281,6 +298,10 @@ export async function adaptInput(spec) {
     scale,
     sheetId: spec.sheetId,
   });
+  const sheet = geometry.sheets[0];
+  sheet.quantity = spec.bin.mode === "auto"
+    ? geometry.parts.reduce((sum, part) => sum + part.quantity, 0)
+    : spec.bin.quantity;
   // Renderer is SVG-specific and loaded only on this path.
   const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
   renderContext.render = nestingToSVG;

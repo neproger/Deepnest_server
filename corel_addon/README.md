@@ -127,7 +127,16 @@ The most recent Corel exports are retained for inspection at:
 ```
 
 The request uses `input.format: "svg"`, `units: "mm"`, and `scale: 25.4`, so
-server placement coordinates correspond to millimeters.
+server placement coordinates correspond to millimeters. The sheet is sent with
+`mode: "auto"`; additional identical sheet instances are opened when the parts
+do not fit on the first sheet. Preview and Apply arrange those sheets from left
+to right.
+
+For a one-root Corel object, Apply duplicates the original object and converts
+the SVG top-left/downward coordinate system back to Corel document coordinates.
+If Corel exports several independent outer roots from one selected object, Apply
+imports the server's `result.svg` instead, so every independently nested contour
+is retained rather than disabling the command.
 
 Raster image content is outside the nesting geometry model. PowerClip and live
 effects depend on how Corel expands them during SVG export and should be tested

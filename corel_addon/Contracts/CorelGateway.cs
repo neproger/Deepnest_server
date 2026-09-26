@@ -58,7 +58,10 @@ namespace CorelDeepnest.Contracts
                 {
                     SourceShape = source,
                     OriginX = Convert.ToDouble(source.LeftX),
-                    OriginY = Convert.ToDouble(source.BottomY)
+                    // Corel SVG export uses the upper-left corner and a
+                    // downward Y axis. Keep the matching Corel anchor so the
+                    // server placement can be converted back without drift.
+                    OriginY = Convert.ToDouble(source.TopY)
                 });
                 parts.Add(new Dictionary<string, object>
                 {
@@ -222,8 +225,102 @@ namespace CorelDeepnest.Contracts
             {
                 return ApplyPlacements(payload);
             }
+            if (operation == "ImportNestingSvg")
+            {
+                return ImportNestingSvg(payload);
+            }
             throw new InvalidOperationException(
                 "Unknown Corel gateway operation: " + operation);
+        }
+
+        private string ImportNestingSvg(string payload)
+        {
+            var request = Json.Deserialize<Dictionary<string, object>>(payload);
+            string svg = Convert.ToString(request["svg"]);
+            if (string.IsNullOrWhiteSpace(svg))
+            {
+                throw new InvalidOperationException("The nesting SVG result is empty.");
+            }
+
+            int placements = Convert.ToInt32(request["placements"]);
+            int sheets = Convert.ToInt32(request["sheets"]);
+            dynamic document = application.ActiveDocument;
+            dynamic page = document.ActivePage;
+            string layerName = "Deepnest Result " + DateTime.Now.ToString("HHmmss");
+            string directory = Path.Combine(Path.GetTempPath(), "CorelDeepnest");
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(
+                directory, "result-" + Guid.NewGuid().ToString("N") + ".svg");
+            bool commandGroupStarted = false;
+            dynamic importFilter = null;
+            try
+            {
+                File.WriteAllText(path, svg);
+                document.BeginCommandGroup("Import Deepnest SVG result");
+                commandGroupStarted = true;
+                dynamic layer = page.CreateLayer(layerName);
+                importFilter = ImportSvg(layer, path);
+                importFilter.Finish();
+                importFilter = null;
+
+                dynamic imported = application.ActiveSelectionRange;
+                if (Convert.ToInt32(imported.Count) > 0)
+                {
+                    imported.Move(
+                        Convert.ToDouble(page.LeftX) - Convert.ToDouble(imported.LeftX),
+                        Convert.ToDouble(page.BottomY) - Convert.ToDouble(imported.BottomY));
+                }
+
+                return Json.Serialize(new Dictionary<string, object>
+                {
+                    { "applied", placements },
+                    { "sheets", sheets },
+                    { "layer", layerName }
+                });
+            }
+            finally
+            {
+                if (importFilter != null)
+                {
+                    try { importFilter.Finish(); } catch { }
+                }
+                if (commandGroupStarted)
+                {
+                    document.EndCommandGroup();
+                }
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private object ImportSvg(object layer, string path)
+        {
+            Type layerType = FindCorelInteropType(
+                "Corel.Interop.VGCore.IVGLayer");
+            MethodInfo importEx = layerType.GetMethod("ImportEx");
+            if (importEx == null)
+            {
+                throw new MissingMethodException(layerType.FullName, "ImportEx");
+            }
+
+            object svgFilter = Enum.ToObject(
+                FindCorelInteropType("Corel.Interop.VGCore.cdrFilter"),
+                SvgFilter);
+            object importOptions = application.CreateStructImportOptions();
+            return importEx.Invoke(layer, new object[]
+            {
+                path,
+                svgFilter,
+                importOptions
+            });
         }
 
         private string ApplyPlacements(string payload)
@@ -296,12 +393,14 @@ namespace CorelDeepnest.Contracts
                         (sheetWidthDocument + sheetGapDocument);
                     double targetX = instanceLeft + application.ConvertUnits(
                         x, MillimeterUnit, documentUnit);
-                    double targetY = sheetBottom + application.ConvertUnits(
-                        y, MillimeterUnit, documentUnit);
+                    double targetY = sheetBottom + sheetHeightDocument -
+                        application.ConvertUnits(y, MillimeterUnit, documentUnit);
 
                     dynamic copy = ((dynamic)captured.SourceShape).Duplicate(0.0, 0.0);
                     copy.MoveToLayer(layer);
-                    copy.RotateEx(rotation, captured.OriginX, captured.OriginY);
+                    // SVG coordinates point down while Corel document
+                    // coordinates point up, so the rotation changes sign.
+                    copy.RotateEx(-rotation, captured.OriginX, captured.OriginY);
                     copy.Move(
                         targetX - captured.OriginX,
                         targetY - captured.OriginY);

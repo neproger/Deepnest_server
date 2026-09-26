@@ -38,10 +38,22 @@ export function nestingToSVG(
 
     group.setAttribute(
       "transform",
-      "translate(" + -sheetbounds.x + " " + (svgheight - sheetbounds.y) + ")"
+      "translate(" + (svgwidth - sheetbounds.x) + " " + -sheetbounds.y + ")"
     );
-    if (svgwidth < sheetbounds.width) {
-      svgwidth = sheetbounds.width;
+    var sheetOutline = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "rect"
+    );
+    sheetOutline.setAttribute("x", sheetbounds.x);
+    sheetOutline.setAttribute("y", sheetbounds.y);
+    sheetOutline.setAttribute("width", sheetbounds.width);
+    sheetOutline.setAttribute("height", sheetbounds.height);
+    sheetOutline.setAttribute("fill", "none");
+    sheetOutline.setAttribute("stroke", "#888");
+    sheetOutline.setAttribute("stroke-width", "0.2");
+    group.appendChild(sheetOutline);
+    if (svgheight < sheetbounds.height) {
+      svgheight = sheetbounds.height;
     }
 
     s.sheetplacements.forEach(function (p) {
@@ -76,8 +88,8 @@ export function nestingToSVG(
       partgroup.setAttribute("id", p.id);
     });
 
-    // put next sheet below
-    svgheight += 1.1 * sheetbounds.height;
+    // Put the next sheet to the right, matching the Corel preview/apply layout.
+    svgwidth += 1.1 * sheetbounds.width;
   });
 
   const { units, scale, mergeLines, dxfExportScale, curveTolerance } =

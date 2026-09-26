@@ -537,6 +537,47 @@ test("SVG API exposes disconnected roots as original Deepnest parts", async () =
   await waitFor(async () => (await statusOf(id)) === "stopped");
 });
 
+test("SVG input: auto bin mode opens multiple sheet instances", async () => {
+  const smallBin = `<svg xmlns="http://www.w3.org/2000/svg"
+    width="120mm" height="60mm" viewBox="0 0 120 60">
+    <rect x="0" y="0" width="120" height="60"/>
+  </svg>`;
+  const largePart = `<svg xmlns="http://www.w3.org/2000/svg"
+    width="115mm" height="55mm" viewBox="0 0 115 55">
+    <rect x="0" y="0" width="115" height="55"/>
+  </svg>`;
+  const created = await createJob({
+    input: {
+      format: "svg",
+      bin: { id: "sheet-auto", data: smallBin, mode: "auto" },
+      parts: [{ id: "large", data: largePart, quantity: 2 }],
+    },
+    config: { units: "mm", scale: 25.4, spacing: 0, timeRatio: 0 },
+  });
+  assert.equal(created.status, 202);
+  const id = created.json.jobId;
+
+  const result = await waitFor(async () => {
+    const response = await getJson(`/api/v1/jobs/${id}/result`);
+    return response.status === 200 && response.json.placements.length === 2
+      ? response.json
+      : null;
+  }, { message: "SVG auto bin did not open a second sheet" });
+
+  assert.deepEqual(result.unplaced, []);
+  assert.deepEqual(result.sheetsUsed, [
+    { sheetId: "sheet-auto", instancesUsed: 2 },
+  ]);
+  assert.deepEqual(
+    result.placements.map((placement) => placement.sheetInstanceId).sort(),
+    [0, 1]
+  );
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
 test("rejects reserved engine fields leaked through config", async () => {
   const withBin = await createJob(
     jobBody([{ id: "p", data: partSvg }], {

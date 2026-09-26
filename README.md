@@ -99,7 +99,7 @@ the same structured result model.
 {
   "input": {
     "format": "svg",
-    "bin": { "id": "sheet-1", "data": "<svg>...</svg>" },
+    "bin": { "id": "sheet-1", "data": "<svg>...</svg>", "mode": "auto" },
     "parts": [
       { "id": "part-A", "data": "<svg>...</svg>", "quantity": 1 }
     ]
@@ -108,6 +108,11 @@ the same structured result model.
   "execution": { "timeLimitMs": 10000 }
 }
 ```
+
+For SVG input, `bin.quantity` supplies a fixed number of identical sheet
+instances. Alternatively, `bin.mode: "auto"` makes enough instances available
+for all imported SVG roots; unused instances are omitted from `sheetsUsed`.
+When neither field is supplied, one sheet is used.
 
 **`format: "geometry"`** — geometry is sent as plain polygons. This path does not
 use SVG, jsdom, or the SVG parser; the request is converted into Canonical
