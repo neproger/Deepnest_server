@@ -106,7 +106,7 @@ The expandable settings row contains:
 - placement strategy;
 - population size and mutation rate;
 - SVG curve tolerance;
-- shared-line detection and fitness weight;
+- shared-line fitness weight (`timeRatio`) and line merging;
 - optional automatic time limit.
 
 Settings are stored in:

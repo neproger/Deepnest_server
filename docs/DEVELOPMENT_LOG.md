@@ -1287,6 +1287,12 @@ false). Логика ошибок worker сохранена (guard из прош
 
 ## 2026-09-27 — CorelDRAW addon: usable nesting workflow
 
+> **Superseded.** Эта запись описывает прямой Corel `DisplayCurve`-extractor
+> (`Contracts/GeometryExtraction.cs`), который затем был удалён в пользу
+> SVG-export. Актуальное состояние см. в следующей записи
+> «CorelDRAW: SVG становится единственным geometry path». Исторический текст
+> оставлен как журнал фактического хода разработки.
+
 ### Goal
 
 Зафиксировать фактически работающий путь от выделения в CorelDRAW до
@@ -1425,3 +1431,107 @@ Contracts и Runtime после изменения успешно собраны
   очистка Corel/VSTA cache при закрытом CorelDRAW.
 - `corel_addon/README.md`, `corel_addon/BUILD.md` — пользовательский сценарий,
   сборка, reload, ограничения и troubleshooting.
+
+---
+
+## 2026-09-27 — CorelDRAW: SVG становится единственным geometry path
+
+### Goal
+
+Убрать прямой Corel `DisplayCurve`-extractor (`Contracts/GeometryExtraction.cs`)
+и сделать SVG export из Corel единственным входом геометрии. Сервер должен
+использовать оригинальный Deepnest SVG pipeline, а addon — не дублировать
+curve flattening / containment / decomposition.
+
+### Why
+
+- `GeometryExtraction.cs` (598 строк) повторял то, что уже делает
+  `main/svgparser.js`: flattening, построение дерева вложенности, holes.
+- Corel SVG export даёт геометрию, которую сервер импортирует штатным путём
+  `load -> clean -> getParts`.
+- Меньше Corel-specific логики в addon; сервер остаётся универсальным и
+  обслуживает Corel так же, как любой другой HTTP-клиент.
+
+### Working architecture (SVG)
+
+```text
+Corel selection
+  -> temporary Corel document (text -> curves)
+  -> SVG export (ExportEx)
+  -> POST /api/v1/jobs   input.format="svg", units="mm", scale=25.4
+  -> GET /result poll every 200 ms
+  -> WinForms preview
+  -> Apply: duplicate/rotate/move original Corel objects on a new layer
+```
+
+- `CorelGateway.CaptureSelectionSvgJson()` экспортирует каждый top-level
+  Shape/Group в SVG; текст в временной копии переводится в curves; рабочий
+  документ и selection восстанавливаются, временный документ/файл удаляются.
+- Каждый выбранный Corel-объект отправляется одним `rigid` part; sheet — с
+  `mode: "auto"`, поэтому дополнительные идентичные листы открываются по мере
+  необходимости. Preview и Apply раскладывают листы слева направо с gap 20 мм.
+- Multi-root rigid часть использует convex hull дочерних контуров только как
+  conservative collision geometry; preview рисует исходные roots.
+- Apply всегда дублирует исходный Corel-объект (server SVG не является
+  выходным artwork) и переводит SVG-координаты (верх-лево/вниз) обратно в
+  координаты Corel, включая смену знака угла поворота.
+
+### Removed
+
+- `corel_addon/Contracts/GeometryExtraction.cs` — удалён целиком.
+- `ICorelGateway` больше не возвращает geometry DTO; SVG-строка —
+  единственный формат обмена геометрией.
+- Прямые Corel `DisplayCurve` / `SubPath.GetPolyline` настройки
+  (`Curve detail`, `corelCurvePrecision`) исчезли из addon.
+
+### Fixes during the SVG stage
+
+- `ExportSvg` вызывает `ExportEx` с типизированными Corel enum/option:
+  `cdrFilter` `1345` (SVG) и `cdrExportRange` `2` (selection), option structs
+  создаются через `application.CreateStructExportOptions()` /
+  `CreateStructPaletteOptions()`.
+- Preview рисует polygon trees, возвращённые сервером; для multi-root rigid
+  части используется `polygontrees`.
+- `bfa3287` — следовать оригинальной семантике Deepnest: независимые outer
+  roots становятся отдельными `part-N#k`, а Apply отключается, если один
+  выбранный Corel-объект дал несколько roots.
+- `b722460` / `49b8b01` — Apply восстановлен и применяется к исходным Corel
+  objects: новый слой `Deepnest Result HHmmss`, прямоугольники листов,
+  duplicate/rotate/move, одна Corel undo-группа.
+- `0e5292a` — контролы формы приведены к семантике engine: rotation variants
+  (`4` = 0/90/180/270), placement type, population, mutation, curve tolerance,
+  shared-line weight (`timeRatio`), merge lines, time limit.
+
+### Current addon files
+
+- `VstaLoader.cs` — стабильные VSTA entry points и hot-reload loader.
+- `VstaMacro.cs` — HTTP client, job lifecycle, WinForms-форма, preview,
+  настройки и Apply.
+- `Contracts/ICorelGateway.cs` — сериализуемая граница вызовов.
+- `Contracts/CorelGateway.cs` — экспорт selection в SVG и Apply placements
+  через Corel Object Model.
+- `build-addon.ps1` — сборка, versioned runtime, упаковка `.CGSaddon` и чистка
+  VSTA cache.
+
+### Verification / state
+
+- CorelDRAW 2025 (`26.1.0.143`), .NET Framework 4.8.
+- Сборка: `corel_addon/build-addon.ps1` → `dist/CorelDeepnest.CGSaddon`;
+  версионный Runtime публикуется в
+  `%LOCALAPPDATA%\CorelDeepnest\Runtime\<build-id>`, указатель `current.txt`
+  обновляется атомарно.
+- Ручной CorelDRAW acceptance остаётся обязательным: координаты и направление
+  поворота SVG export, текст, PowerClip и live effects.
+
+### Known limitations
+
+- Raster `<image>` вне модели nesting geometry.
+- PowerClip/live effects зависят от того, как их раскрывает SVG export Corel.
+- Multi-root rigid использует convex hull — безопасно, но менее плотно.
+- Apply disabled, когда один исходный объект дал несколько roots (нет 1:1
+  mapping источника и part).
+
+### Commits
+
+`1457135 refactor: make SVG the sole Corel geometry path` plus follow-ups
+`bfa3287`, `b722460`, `0e5292a`, `49b8b01`.

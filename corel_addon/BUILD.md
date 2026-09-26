@@ -92,7 +92,6 @@ VstaMacro.cs
 Runtime\CorelDeepnest.Runtime.csproj
 Contracts\ICorelGateway.cs
 Contracts\CorelGateway.cs
-Contracts\GeometryExtraction.cs
 Contracts\CorelDeepnest.Contracts.csproj
 ```
 
@@ -104,11 +103,11 @@ the domain boundary. The gateway assembly is loaded from the current version
 directory, so its implementation can be updated together with Runtime. The
 child domain is unloaded when the command or form closes.
 
-Curve node coordinates from CorelDRAW are converted from the active document's
-units to millimeters and then from absolute document coordinates to local part
-coordinates before they are sent to the server. The sheet fields, server
-payload, and placement preview therefore all use millimeters. The same local
-polygons are used by the placement preview.
+The selected shapes are exported by Corel as SVG in a temporary document. The
+server imports that SVG with `units: "mm"` and `scale: 25.4`, so one server
+coordinate is one millimeter. The sheet fields, server payload, and placement
+preview therefore all use millimeters. Apply converts the SVG
+top-left/downward coordinate system back to Corel document coordinates.
 
 The addon uses framework assemblies already present on Windows/CorelDRAW:
 
@@ -241,8 +240,9 @@ values entered by the user.
 
 The persisted fields are sheet width and height, spacing, rotation count,
 placement strategy, population size, mutation rate, SVG curve tolerance,
-shared-line weight, shared-line detection, and automatic time limit. Obsolete
-direct-geometry and worker-count settings are ignored.
+shared-line fitness weight (`timeRatio`), line merging (`mergeLines`), and
+automatic time limit. Obsolete direct-geometry and worker-count settings are
+ignored.
 
 Independent outer roots are separate parts, matching original Deepnest. If one
 Corel source object produces several roots, preview and nesting remain valid,

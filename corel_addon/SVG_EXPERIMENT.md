@@ -1,12 +1,12 @@
 # Corel SVG input
 
-This work lives on branch `experiment/corel-svg-input`. SVG export is now the
-only Corel geometry input path; the former direct `DisplayCurve` path was
-removed after side-by-side testing.
+SVG export is the only Corel geometry input path. The former direct
+`DisplayCurve` path was removed after side-by-side testing; the SVG work was
+merged into `master`. This document describes the current pipeline.
 
 ## Run
 
-1. Restart Deepnest Server so it loads the experimental SVG adapter:
+1. Start Deepnest Server:
 
    ```powershell
    npm start
@@ -63,9 +63,9 @@ one outer polygon per rigid part. Preview metadata retains the original roots.
 - A multi-root rigid object uses a convex hull for collision, which is safe but
   can leave more unused material than a native multi-polygon NFP implementation.
 
-## Comparison matrix
+## Acceptance checklist
 
-Run the same selection in both modes and compare nesting and Apply results:
+Run each selection and check nesting plus Apply results:
 
 1. rectangle with known dimensions;
 2. ellipse;
