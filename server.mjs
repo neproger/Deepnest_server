@@ -10,7 +10,35 @@ import { createJobsRouter } from "./src/api/jobs-router.mjs";
 
 export const app = express();
 export const jobs = new JobManager({ maxConcurrent: 1 });
-const PORT = 8080;
+export const DEFAULT_HOST = "127.0.0.1";
+export const DEFAULT_PORT = 8080;
+
+function environmentPort(value) {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 0 && port <= 65535
+    ? port
+    : DEFAULT_PORT;
+}
+
+const PORT = environmentPort(process.env.DEEPNEST_PORT);
+const HOST = process.env.DEEPNEST_HOST || DEFAULT_HOST;
+
+// The server is intended to be consumed by local CAD and browser clients.
+// Keep the network listener local by default, while allowing browser clients
+// served from any origin to call the public API and subscribe to SSE.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    req.get("Access-Control-Request-Headers") || "Content-Type"
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  return next();
+});
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -47,15 +75,13 @@ app.use((error, req, res, next) => {
  * @param {{ port?: number, host?: string }} [options]
  * @returns {Promise<import("http").Server>}
  */
-export async function start({ port = PORT, host } = {}) {
+export async function start({ port = PORT, host = HOST } = {}) {
   return await new Promise((resolve) => {
     const onListen = () => {
-      console.log("Server listening on", `http://${host || "localhost"}:${port}`);
+      console.log("Server listening on", `http://${host}:${port}`);
       resolve(server);
     };
-    const server = host
-      ? app.listen(port, host, onListen)
-      : app.listen(port, onListen);
+    const server = app.listen(port, host, onListen);
   });
 }
 

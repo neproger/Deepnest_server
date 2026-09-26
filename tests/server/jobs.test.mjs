@@ -18,7 +18,7 @@ let partSvg;
 let partHoleSvg;
 
 before(async () => {
-  server = await start({ port: 0, host: "127.0.0.1" });
+  server = await start({ port: 0 });
   base = `http://127.0.0.1:${server.address().port}`;
   binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
   partSvg = await readFile(path.resolve(fixtures, "part.svg"), "utf8");
@@ -369,6 +369,25 @@ test("returns stable JSON errors for invalid input and unknown jobs", async () =
   });
   assert.equal(malformedRes.status, 400);
   assert.equal((await malformedRes.json()).error.code, "INVALID_REQUEST");
+});
+
+test("allows cross-origin API requests and CORS preflight", async () => {
+  const health = await fetch(`${base}/health`, {
+    headers: { Origin: "https://client.example" },
+  });
+  assert.equal(health.headers.get("access-control-allow-origin"), "*");
+
+  const preflight = await fetch(`${base}/api/v1/jobs`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://client.example",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.match(preflight.headers.get("access-control-allow-methods") || "", /POST/);
+  assert.match(preflight.headers.get("access-control-allow-headers") || "", /content-type/i);
 });
 
 test("TIME limit moves the job to completed with a saved result", async () => {

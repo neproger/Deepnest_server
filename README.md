@@ -54,7 +54,24 @@ npm start        # run the headless HTTP server (alias: npm run server)
 node cli.mjs     # run the CLI
 ```
 
-`npm start` listens on `http://127.0.0.1:8080`.
+`npm start` listens on `http://127.0.0.1:8080`. This loopback host is the
+default so the service is available to local CAD and browser clients but is not
+exposed on the network. Browser clients from any origin can call the API: CORS
+preflight requests and `Content-Type: application/json` are allowed, including
+for SSE connections.
+
+To use a different listener, set both values explicitly when starting the
+server. In PowerShell:
+
+```powershell
+$env:DEEPNEST_HOST = "127.0.0.1"
+$env:DEEPNEST_PORT = "8080"
+npm start
+```
+
+For a LAN or reverse-proxy deployment, set `DEEPNEST_HOST=0.0.0.0` deliberately.
+The API has no authentication, so do not expose that listener directly to an
+untrusted network.
 
 ### HTTP API
 
