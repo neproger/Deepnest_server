@@ -45,6 +45,11 @@ namespace CorelDeepnest.Runtime
         private sealed class PreviewPart
         {
             public string Id;
+            public List<PreviewContour> Contours;
+        }
+
+        private sealed class PreviewContour
+        {
             public List<GeometryPoint> Points;
             public List<List<GeometryPoint>> Holes;
         }
@@ -70,14 +75,12 @@ namespace CorelDeepnest.Runtime
 
         private sealed class JobRunResult
         {
-            public string JobId;
             public PreviewModel Preview;
             public string JobStatus;
             public string UpdatedAt;
             public double Fitness;
             public int Index;
             public bool Better;
-            public bool CanApply;
         }
 
         private sealed class NestingOptions
@@ -285,7 +288,8 @@ namespace CorelDeepnest.Runtime
                 {
                     { "id", Convert.ToString(capturedPart["id"]) },
                     { "data", Convert.ToString(capturedPart["data"]) },
-                    { "quantity", 1 }
+                    { "quantity", 1 },
+                    { "rigid", true }
                 });
             }
 
@@ -348,16 +352,42 @@ namespace CorelDeepnest.Runtime
             }
         }
 
-        private static PreviewPart ParsePreviewPart(
-            string partId, Dictionary<string, object> polygonTree)
+        private static PreviewContour ParsePreviewContour(
+            Dictionary<string, object> polygonTree)
         {
             var holes = new List<List<GeometryPoint>>();
             CollectChildContours(polygonTree, holes);
-            return new PreviewPart
+            return new PreviewContour
             {
-                Id = partId,
                 Points = ParseGeometryPoints(polygonTree["points"]),
                 Holes = holes
+            };
+        }
+
+        private static PreviewPart ParsePreviewPart(
+            Dictionary<string, object> part)
+        {
+            var contours = new List<PreviewContour>();
+            object treesValue;
+            if (part.TryGetValue("polygontrees", out treesValue) &&
+                treesValue != null)
+            {
+                foreach (object treeValue in
+                    (System.Collections.IEnumerable)treesValue)
+                {
+                    contours.Add(ParsePreviewContour(
+                        (Dictionary<string, object>)treeValue));
+                }
+            }
+            else
+            {
+                contours.Add(ParsePreviewContour(
+                    (Dictionary<string, object>)part["polygontree"]));
+            }
+            return new PreviewPart
+            {
+                Id = Convert.ToString(part["id"]),
+                Contours = contours
             };
         }
 
@@ -412,9 +442,7 @@ namespace CorelDeepnest.Runtime
                 foreach (object item in (System.Collections.IEnumerable)value)
                 {
                     var part = (Dictionary<string, object>)item;
-                    parts.Add(ParsePreviewPart(
-                        Convert.ToString(part["id"]),
-                        (Dictionary<string, object>)part["polygontree"]));
+                    parts.Add(ParsePreviewPart(part));
                 }
             }
 
@@ -468,7 +496,6 @@ namespace CorelDeepnest.Runtime
         {
             var root = Json.Deserialize<Dictionary<string, object>>(json);
             bool better = true;
-            bool canApply = true;
             object statusValue;
             if (root.TryGetValue("status", out statusValue) && statusValue != null)
             {
@@ -479,24 +506,8 @@ namespace CorelDeepnest.Runtime
                     better = Convert.ToBoolean(betterValue);
                 }
             }
-            object partsValue;
-            if (root.TryGetValue("parts", out partsValue) && partsValue != null)
-            {
-                foreach (object item in (System.Collections.IEnumerable)partsValue)
-                {
-                    var part = (Dictionary<string, object>)item;
-                    if (Convert.ToString(part["id"]).IndexOf('#') >= 0)
-                    {
-                        canApply = false;
-                        break;
-                    }
-                }
-            }
             return new JobRunResult
             {
-                JobId = root.ContainsKey("jobId")
-                    ? Convert.ToString(root["jobId"])
-                    : string.Empty,
                 Preview = ParsePreview(json, sheetWidth, sheetHeight, parts),
                 JobStatus = root.ContainsKey("jobStatus")
                     ? Convert.ToString(root["jobStatus"])
@@ -510,8 +521,7 @@ namespace CorelDeepnest.Runtime
                 Index = root.ContainsKey("index")
                     ? Convert.ToInt32(root["index"])
                     : 0,
-                Better = better,
-                CanApply = canApply
+                Better = better
             };
         }
 
@@ -735,9 +745,7 @@ namespace CorelDeepnest.Runtime
                     apply.Enabled = jobResult.Preview.Placements.Count > 0;
                     status.Text = "Best placement accepted: " +
                         jobResult.Preview.Placements.Count + " part(s) on " +
-                        jobResult.Preview.SheetCount + " sheet(s)." +
-                        (jobResult.CanApply ? string.Empty :
-                            " Separate contours will be imported from result SVG.");
+                        jobResult.Preview.SheetCount + " sheet(s).";
                 }
                 catch (Exception error)
                 {
@@ -775,30 +783,6 @@ namespace CorelDeepnest.Runtime
                 apply.Enabled = false;
                 try
                 {
-                    if (!completedResult.CanApply)
-                    {
-                        string resultSvg = Send(
-                            "GET",
-                            "api/v1/jobs/" + completedResult.JobId + "/result.svg",
-                            null);
-                        string importedResponse = gateway.Invoke(
-                            "ImportNestingSvg",
-                            Json.Serialize(new Dictionary<string, object>
-                            {
-                                { "svg", resultSvg },
-                                { "placements", completedResult.Preview.Placements.Count },
-                                { "sheets", completedResult.Preview.SheetCount }
-                            }));
-                        var imported = Json.Deserialize<Dictionary<string, object>>(
-                            importedResponse);
-                        status.Text = "Imported " +
-                            Convert.ToInt32(imported["applied"]) +
-                            " part(s) on " + Convert.ToInt32(imported["sheets"]) +
-                            " sheet(s), layer " +
-                            Convert.ToString(imported["layer"]) + ".";
-                        return;
-                    }
-
                     var placements = new List<object>();
                     foreach (PreviewPlacement placement in completedResult.Preview.Placements)
                     {
@@ -1056,7 +1040,7 @@ namespace CorelDeepnest.Runtime
                     PreviewPlacement placement = model.Placements[placementIndex];
                     PreviewPart part = model.Parts.Find(
                         delegate(PreviewPart candidate) { return candidate.Id == placement.PartId; });
-                    if (part == null || part.Points.Count < 3)
+                    if (part == null || part.Contours.Count == 0)
                     {
                         continue;
                     }
@@ -1066,10 +1050,6 @@ namespace CorelDeepnest.Runtime
                     double sin = Math.Sin(radians);
                     float placementSheetX = originX + placement.SheetInstanceId *
                         (sheetWidth + sheetGap);
-                    System.Drawing.PointF[] polygon = TransformPolygon(
-                        part.Points, cos, sin, placement, placementSheetX,
-                        originY, sheetHeight, scale);
-
                     DrawingColor color = colors[placementIndex % colors.Length];
                     using (Brush fill = new SolidBrush(color))
                     using (Pen outline = new Pen(
@@ -1082,16 +1062,29 @@ namespace CorelDeepnest.Runtime
                         LineAlignment = StringAlignment.Center
                     })
                     {
-                        path.AddPolygon(polygon);
-                        foreach (List<GeometryPoint> hole in part.Holes)
+                        foreach (PreviewContour contour in part.Contours)
                         {
+                            if (contour.Points.Count < 3)
+                            {
+                                continue;
+                            }
                             path.AddPolygon(TransformPolygon(
-                                hole, cos, sin, placement, placementSheetX,
+                                contour.Points, cos, sin, placement, placementSheetX,
                                 originY, sheetHeight, scale));
+                            foreach (List<GeometryPoint> hole in contour.Holes)
+                            {
+                                path.AddPolygon(TransformPolygon(
+                                    hole, cos, sin, placement, placementSheetX,
+                                    originY, sheetHeight, scale));
+                            }
+                        }
+                        if (path.PointCount == 0)
+                        {
+                            continue;
                         }
                         e.Graphics.FillPath(fill, path);
                         e.Graphics.DrawPath(outline, path);
-                        RectangleF bounds = PolygonBounds(polygon);
+                        RectangleF bounds = path.GetBounds();
                         string label = CompactPartLabel(placement.PartId);
                         e.Graphics.DrawString(
                             label, Font, labelBrush, bounds, labelFormat);
@@ -1115,22 +1108,6 @@ namespace CorelDeepnest.Runtime
                         originY + sheetHeight - (float)worldY * scale);
                 }
                 return polygon;
-            }
-
-            private static RectangleF PolygonBounds(System.Drawing.PointF[] polygon)
-            {
-                float minX = float.MaxValue;
-                float minY = float.MaxValue;
-                float maxX = float.MinValue;
-                float maxY = float.MinValue;
-                foreach (System.Drawing.PointF point in polygon)
-                {
-                    minX = Math.Min(minX, point.X);
-                    minY = Math.Min(minY, point.Y);
-                    maxX = Math.Max(maxX, point.X);
-                    maxY = Math.Max(maxY, point.Y);
-                }
-                return RectangleF.FromLTRB(minX, minY, maxX, maxY);
             }
 
             private static string CompactPartLabel(string partId)

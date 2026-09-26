@@ -83,7 +83,9 @@ export class Job {
       );
       this.svgAvailable = Boolean(renderContext);
       this.sheetMap = buildSheetMap(geometry.sheets);
-      this.previewParts = buildPreviewParts(geometry.parts);
+      this.previewParts = buildPreviewParts(
+        renderContext?.previewParts ?? geometry.parts
+      );
       this.abort = await nestWithRender(
         geometry,
         renderContext,
@@ -217,7 +219,12 @@ function buildPreviewParts(parts) {
     if (!unique.has(part.id)) {
       unique.set(part.id, {
         id: part.id,
-        polygontree: toPolygonDto(part.polygontree),
+        polygontree: toPolygonDto(
+          part.polygontree ?? part.polygontrees[0]
+        ),
+        ...(part.polygontrees?.length > 1 && {
+          polygontrees: part.polygontrees.map(toPolygonDto),
+        }),
       });
     }
   }

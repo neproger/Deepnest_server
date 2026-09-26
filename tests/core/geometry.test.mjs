@@ -121,6 +121,23 @@ test("one SVG input follows original Deepnest root-to-part behavior", async () =
   );
 });
 
+test("rigid SVG input uses one conservative hull and retains preview roots", async () => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="10" height="10"/>
+    <rect x="30" y="0" width="10" height="10"/>
+  </svg>`;
+  const { geometry, renderContext } = await parseSvgInput(
+    [{ file: "corel-object", svg, rigid: true }],
+    { bin: { width: 100, height: 100 }, units: "mm", scale: 25.4 }
+  );
+
+  assert.equal(geometry.parts.length, 1);
+  assert.equal(geometry.parts[0].id, "corel-object");
+  assert.equal(geometry.parts[0].polygontree.length, 4);
+  assert.equal(renderContext.previewParts.length, 1);
+  assert.equal(renderContext.previewParts[0].polygontrees.length, 2);
+});
+
 test("worker payload geometry is DOM-free with parallel metadata arrays", async () => {
   const binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
   const holeSvg = await readFile(path.resolve(fixtures, "part-hole.svg"), "utf8");

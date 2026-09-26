@@ -537,6 +537,32 @@ test("SVG API exposes disconnected roots as original Deepnest parts", async () =
   await waitFor(async () => (await statusOf(id)) === "stopped");
 });
 
+test("SVG API keeps a rigid multi-root input as one placed part", async () => {
+  const disconnected = `<svg xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="10" height="10"/>
+    <rect x="30" y="0" width="10" height="10"/>
+  </svg>`;
+  const created = (await createJob(
+    jobBody([{ id: "corel-object", data: disconnected, rigid: true }])
+  )).json;
+  const id = created.jobId;
+
+  const result = await waitFor(async () => {
+    const response = await getJson(`/api/v1/jobs/${id}/result`);
+    return response.status === 200 ? response.json : null;
+  });
+
+  assert.equal(result.placements.length, 1);
+  assert.equal(result.placements[0].partId, "corel-object");
+  assert.equal(result.parts.length, 1);
+  assert.equal(result.parts[0].polygontrees.length, 2);
+  assert.ok(result.parts[0].polygontree.points.length >= 3);
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
 test("SVG input: auto bin mode opens multiple sheet instances", async () => {
   const smallBin = `<svg xmlns="http://www.w3.org/2000/svg"
     width="120mm" height="60mm" viewBox="0 0 120 60">

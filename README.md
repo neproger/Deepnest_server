@@ -101,7 +101,7 @@ the same structured result model.
     "format": "svg",
     "bin": { "id": "sheet-1", "data": "<svg>...</svg>", "mode": "auto" },
     "parts": [
-      { "id": "part-A", "data": "<svg>...</svg>", "quantity": 1 }
+      { "id": "part-A", "data": "<svg>...</svg>", "quantity": 1, "rigid": true }
     ]
   },
   "config": { "units": "mm", "spacing": 0 },
@@ -113,6 +113,12 @@ For SVG input, `bin.quantity` supplies a fixed number of identical sheet
 instances. Alternatively, `bin.mode: "auto"` makes enough instances available
 for all imported SVG roots; unused instances are omitted from `sheetsUsed`.
 When neither field is supplied, one sheet is used.
+
+By default, disconnected outer roots in one SVG are independent parts, matching
+the original Deepnest importer. Set `part.rigid: true` when one input document
+represents one physical object that must receive a single placement transform.
+For a rigid multi-root SVG the engine uses the roots' convex hull as conservative
+collision geometry, while result preview metadata retains the original roots.
 
 **`format: "geometry"`** — geometry is sent as plain polygons. This path does not
 use SVG, jsdom, or the SVG parser; the request is converted into Canonical

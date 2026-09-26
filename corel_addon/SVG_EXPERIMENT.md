@@ -46,9 +46,10 @@ For diagnostics the last export of every selected part is retained at:
 
 The server passes every SVG through the original Deepnest import pipeline:
 `load -> clean -> getParts`. A root polygon keeps its nested contours as holes.
-Every disconnected outer root becomes an independent nesting part, matching
-the behavior of the original Deepnest UI. When one Corel export produces more
-than one root, stable result ids use `part-N#1`, `part-N#2`, and so on.
+The Corel client marks every selected object as `rigid`, so disconnected outer
+roots retain one `part-N` identity and one placement transform. Their convex
+hull is used as conservative collision geometry because the current engine has
+one outer polygon per rigid part. Preview metadata retains the original roots.
 
 ## Current limitations
 
@@ -57,10 +58,10 @@ than one root, stable result ids use `part-N#1`, `part-N#2`, and so on.
 - The Corel exporter and server parser must be tested for coordinate origin,
   rotation direction, physical dimensions, text, PowerClip, and effects.
 - Raster `<image>` content is outside the nesting geometry model.
-- **Apply to CorelDRAW** is disabled when one selected Corel shape produces
-  several disconnected outer roots. Original Deepnest treats those roots as
-  separate physical parts; mapping them back requires splitting the source
-  Corel object first. Single-root shapes can still be applied.
+- Apply always duplicates the selected Corel object. The SVG and its polygonal
+  approximation are calculation and preview data only.
+- A multi-root rigid object uses a convex hull for collision, which is safe but
+  can leave more unused material than a native multi-polygon NFP implementation.
 
 ## Comparison matrix
 

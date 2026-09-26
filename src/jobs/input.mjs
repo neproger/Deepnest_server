@@ -142,7 +142,14 @@ function validateSvgInput(input, config, execution) {
         `input.parts[${index}].quantity must be an integer >= 1`
       );
     }
-    return { id: part.id, data: part.data, quantity };
+    if (part.rigid !== undefined && typeof part.rigid !== "boolean") {
+      throw httpError(
+        400,
+        "INVALID_REQUEST",
+        `input.parts[${index}].rigid must be a boolean`
+      );
+    }
+    return { id: part.id, data: part.data, quantity, rigid: part.rigid === true };
   });
 
   return {
@@ -253,7 +260,7 @@ export function toNestInput(spec) {
   const svgInput = [];
   for (const part of spec.parts) {
     for (let i = 0; i < part.quantity; i++) {
-      svgInput.push({ file: part.id, svg: part.data });
+      svgInput.push({ file: part.id, svg: part.data, rigid: part.rigid });
     }
   }
   return { svgInput, bin: spec.bin.data };

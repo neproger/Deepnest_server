@@ -55,21 +55,25 @@ export async function parseSvgInput(svgInput, options = {}) {
     return {
       id: typeof input === "object" ? input.file : `part-${index}`,
       imported,
+      rigid: typeof input === "object" && input.rigid === true,
     };
   }).filter(Boolean);
   if (importedGroups.length === 0) {
     throw new Error("Nothing to nest");
   }
-  const partGroups = importedGroups.flatMap(({ id, imported }) =>
-    imported.map((part, rootIndex) => ({
-      id: imported.length === 1 ? id : `${id}#${rootIndex + 1}`,
-      imported: [part],
-    }))
+  const partGroups = importedGroups.flatMap(({ id, imported, rigid }) =>
+    rigid
+      ? [{ id, imported }]
+      : imported.map((part, rootIndex) => ({
+          id: imported.length === 1 ? id : `${id}#${rootIndex + 1}`,
+          imported: [part],
+        }))
   );
 
   const sheetId = options.sheetId ?? "sheet-0";
   const entries = [];
   const parts = [];
+  const previewParts = [];
 
   entries.push({
     svgelements: sheetPart.svgelements,
@@ -77,15 +81,21 @@ export async function parseSvgInput(svgInput, options = {}) {
   });
 
   partGroups.forEach(({ id, imported }) => {
-    const part = imported[0];
+    const tree = imported.length === 1
+      ? clonePolygonTree(imported[0].polygontree)
+      : convexHullTree(imported.map((part) => part.polygontree));
     parts.push({
       id,
       quantity: 1,
-      polygontree: clonePolygonTree(part.polygontree),
+      polygontree: tree,
     });
     entries.push({
-      svgelements: part.svgelements,
-      bounds: part.bounds,
+      svgelements: imported.flatMap((part) => part.svgelements),
+      bounds: polygonBounds(tree),
+    });
+    previewParts.push({
+      id,
+      polygontrees: imported.map((part) => clonePolygonTree(part.polygontree)),
     });
   });
 
@@ -97,6 +107,56 @@ export async function parseSvgInput(svgInput, options = {}) {
       ],
       parts,
     },
-    renderContext: { entries },
+    renderContext: { entries, previewParts },
+  };
+}
+
+function convexHullTree(trees) {
+  const points = trees.flatMap((tree) =>
+    tree.map(({ x, y }) => ({ x, y }))
+  );
+  points.sort((a, b) => a.x - b.x || a.y - b.y);
+  const unique = points.filter((point, index) =>
+    index === 0 ||
+    point.x !== points[index - 1].x ||
+    point.y !== points[index - 1].y
+  );
+  if (unique.length < 3) {
+    throw new Error("An SVG part must contain at least three distinct points");
+  }
+  const cross = (a, b, c) =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const lower = [];
+  for (const point of unique) {
+    while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), point) <= 0) {
+      lower.pop();
+    }
+    lower.push(point);
+  }
+  const upper = [];
+  for (let index = unique.length - 1; index >= 0; index -= 1) {
+    const point = unique[index];
+    while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), point) <= 0) {
+      upper.pop();
+    }
+    upper.push(point);
+  }
+  lower.pop();
+  upper.pop();
+  const hull = lower.concat(upper);
+  hull.children = [];
+  return hull;
+}
+
+function polygonBounds(polygon) {
+  const xs = polygon.map((point) => point.x);
+  const ys = polygon.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    x,
+    y,
+    width: Math.max(...xs) - x,
+    height: Math.max(...ys) - y,
   };
 }
