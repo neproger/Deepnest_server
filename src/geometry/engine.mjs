@@ -79,6 +79,14 @@ export async function nestWithRender(geometry, renderContext, callback, options 
 }
 
 async function run(geometry, renderContext, callback, options) {
+  // Engine selection. The SVGnest Rust/WASM core is the default now; set
+  // DEEPNEST_ENGINE=deepnest to fall back to the original Deepnest engine.
+  const engine = (process.env.DEEPNEST_ENGINE || "wasm").toLowerCase();
+  if (engine !== "deepnest") {
+    const { nestGeometryWasm } = await import("./engine-wasm/index.mjs");
+    return nestGeometryWasm(geometry, callback, options);
+  }
+
   const normalized = normalizeGeometry(geometry);
   const { deepNestConfig, timeout, progressCallback, onError } =
     resolveEngineConfig(options);
