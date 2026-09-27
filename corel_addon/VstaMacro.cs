@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -78,6 +78,7 @@ namespace CorelDeepnest.Runtime
             public PreviewModel Preview;
             public string JobStatus;
             public string UpdatedAt;
+            public string StartedAt;
             public double Fitness;
             public int Index;
             public bool Better;
@@ -112,7 +113,7 @@ namespace CorelDeepnest.Runtime
                 return;
             }
 
-            throw new InvalidOperationException("Unknown CorelDeepnest command: " + command);
+            throw new InvalidOperationException("Неизвестная команда CorelDeepnest: " + command);
         }
 
         private static void TestDeepnestConnection()
@@ -120,7 +121,7 @@ namespace CorelDeepnest.Runtime
             try
             {
                 MessageBox.Show(
-                    "Deepnest Server connection OK" + Environment.NewLine + Environment.NewLine +
+                    "Подключение к Deepnest Server — OK" + Environment.NewLine + Environment.NewLine +
                     Send("GET", "health", null),
                     "CorelDeepnest",
                     MessageBoxButtons.OK,
@@ -128,7 +129,7 @@ namespace CorelDeepnest.Runtime
             }
             catch (Exception error)
             {
-                ShowError("Deepnest Server connection failed", error);
+                ShowError("Не удалось подключиться к Deepnest Server", error);
             }
         }
 
@@ -143,24 +144,20 @@ namespace CorelDeepnest.Runtime
             }
             catch (Exception error)
             {
-                ShowError("Deepnest window failed", error);
+                ShowError("Ошибка окна Deepnest", error);
             }
         }
 
-        private static JobRunResult RunJob(ICorelGateway gateway, NestingOptions options,
-            Action<string> jobCreated, Action<JobRunResult> resultUpdated,
-            Func<bool> stopRequested)
+        private static JobRunResult RunJob(string requestJson, NestingOptions options,
+            List<PreviewPart> previewParts, Action<string> jobCreated,
+            Action<JobRunResult> resultUpdated, Func<bool> stopRequested)
         {
             string jobId = null;
-            List<PreviewPart> previewParts;
             JobRunResult latestResult = null;
             string latestUpdate = null;
-            bool stopSent = false;
 
             try
             {
-                string requestJson = Json.Serialize(BuildRequest(
-                    gateway, options, out previewParts));
                 string created = Send("POST", "api/v1/jobs", requestJson);
                 Dictionary<string, object> createdObject =
                     Json.Deserialize<Dictionary<string, object>>(created);
@@ -180,12 +177,14 @@ namespace CorelDeepnest.Runtime
                 {
                     if (stopRequested())
                     {
-                        Send("POST", "api/v1/jobs/" + jobId + "/stop", null);
-                        stopSent = true;
+                        // Request the stop without blocking the UI: the server
+                        // acknowledges immediately and tears the engine down in
+                        // the background. The finally block also sends a stop.
+                        RequestStop(jobId);
                         if (latestResult == null)
                         {
                             throw new OperationCanceledException(
-                                "The nesting job was stopped before it produced a placement.");
+                                "Задача остановлена до получения результата.");
                         }
 
                         JobRunResult stoppedResult = ReadResult(
@@ -247,14 +246,16 @@ namespace CorelDeepnest.Runtime
                         }
                     }
 
-                    System.Windows.Forms.Application.DoEvents();
                     Thread.Sleep(200);
                 }
             }
             finally
             {
-                if (!string.IsNullOrEmpty(jobId) && !stopSent)
+                if (!string.IsNullOrEmpty(jobId))
                 {
+                    // Idempotent: stop the job if it is still running. Also a
+                    // safety net for the best-effort async stop above. The
+                    // server responds immediately, so this does not block.
                     try
                     {
                         Send("POST", "api/v1/jobs/" + jobId + "/stop", null);
@@ -515,6 +516,9 @@ namespace CorelDeepnest.Runtime
                 UpdatedAt = root.ContainsKey("updatedAt")
                     ? Convert.ToString(root["updatedAt"])
                     : string.Empty,
+                StartedAt = root.ContainsKey("startedAt")
+                    ? Convert.ToString(root["startedAt"])
+                    : string.Empty,
                 Fitness = root.ContainsKey("fitness")
                     ? Convert.ToDouble(root["fitness"])
                     : 0,
@@ -548,6 +552,22 @@ namespace CorelDeepnest.Runtime
             }
         }
 
+        private static void RequestStop(string jobId)
+        {
+            string path = "api/v1/jobs/" + jobId + "/stop";
+            System.Threading.Tasks.Task.Run(delegate
+            {
+                try
+                {
+                    Send("POST", path, null);
+                }
+                catch
+                {
+                    // Best effort: the caller also stops the job on exit.
+                }
+            });
+        }
+
         private static void ThrowHttpError(HttpResponseMessage response, string body)
         {
             throw new HttpRequestException(
@@ -573,19 +593,27 @@ namespace CorelDeepnest.Runtime
             private readonly NumericUpDown rotations = NumberInput(4, 0);
             private readonly NumericUpDown populationSize = NumberInput(10, 0);
             private readonly NumericUpDown mutationRate = NumberInput(10, 0);
+            private readonly ComboBox placementType = new ComboBox();
             private readonly NumericUpDown curveTolerance = NumberInput(0.3M, 3);
             private readonly NumericUpDown timeRatio = NumberInput(0.5M, 2);
             private readonly NumericUpDown timeLimitSeconds = NumberInput(0, 0);
-            private readonly ComboBox placementType = new ComboBox();
             private readonly CheckBox mergeLines = new CheckBox();
             private readonly ToolTip help = new ToolTip();
             private readonly Button run = new Button();
             private readonly Button stop = new Button();
             private readonly Button apply = new Button();
             private readonly Label status = new Label();
+            private readonly System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer();
             private readonly PreviewPanel preview = new PreviewPanel();
-            private bool stopRequested;
+            private volatile bool stopRequested;
             private JobRunResult completedResult;
+            private System.DateTime runStartedUtc;
+            private System.DateTime? runServerStartedUtc;
+            private int runLimitSeconds;
+            private int lastIndex;
+            private double lastFitness;
+            private int lastPlaced;
+            private int lastSheets;
 
             public NestingForm(ICorelGateway gateway)
             {
@@ -605,17 +633,14 @@ namespace CorelDeepnest.Runtime
                 timeRatio.Increment = 0.1M;
                 timeLimitSeconds.Maximum = 86400;
                 placementType.DropDownStyle = ComboBoxStyle.DropDownList;
-                placementType.Items.AddRange(new object[]
-                {
-                    "gravity", "box", "convexhull"
-                });
+                placementType.Items.AddRange(new object[] { "gravity", "box", "convexhull" });
                 placementType.SelectedIndex = 0;
                 placementType.Width = 100;
-                mergeLines.Text = "Merge lines";
+                mergeLines.Text = "Объединять линии";
                 mergeLines.Checked = true;
                 mergeLines.AutoSize = true;
                 mergeLines.Margin = new Padding(8, 23, 8, 0);
-                Text = "Deepnest Server — runtime " + BuildInfo.Id;
+                Text = "Deepnest Server — сборка " + BuildInfo.Id;
                 Width = 920;
                 Height = 680;
                 StartPosition = FormStartPosition.CenterParent;
@@ -623,53 +648,59 @@ namespace CorelDeepnest.Runtime
                 var fields = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Top,
-                    Height = 58,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
                     WrapContents = false,
                     Padding = new Padding(8, 3, 8, 3)
                 };
 
-                AddField(fields, "Width, mm", width);
-                AddField(fields, "Height, mm", height);
-                AddField(fields, "Spacing, mm", spacing);
-                AddField(fields, "Rotation variants", rotations);
+                AddField(fields, "Ширина, мм", width);
+                AddField(fields, "Высота, мм", height);
+                AddField(fields, "Зазор, мм", spacing);
+                AddField(fields, "Вариантов поворота", rotations);
 
                 var advancedFields = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Top,
-                    Height = 58,
-                    WrapContents = false,
-                    AutoScroll = true,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    WrapContents = true,
                     Visible = false,
                     Padding = new Padding(8, 3, 8, 3),
                     BackColor = DrawingColor.FromArgb(242, 242, 242)
                 };
-                AddField(advancedFields, "Placement", placementType);
-                AddField(advancedFields, "Population", populationSize);
-                AddField(advancedFields, "Mutation, %", mutationRate);
-                AddField(advancedFields, "Tolerance, mm", curveTolerance);
-                AddField(advancedFields, "Line weight", timeRatio);
-                AddField(advancedFields, "Limit, sec", timeLimitSeconds);
+                AddField(advancedFields, "Размещение", placementType);
+                AddField(advancedFields, "Популяция", populationSize);
+                AddField(advancedFields, "Мутация, %", mutationRate);
+                AddField(advancedFields, "Точность, мм", curveTolerance);
+                AddField(advancedFields, "Вес линий", timeRatio);
+                AddField(advancedFields, "Лимит, сек", timeLimitSeconds);
                 advancedFields.Controls.Add(mergeLines);
 
-                help.SetToolTip(placementType,
-                    "gravity favors compact width; box minimizes bounding-box area; convexhull minimizes hull area.");
+                help.SetToolTip(width, "Ширина листа в миллиметрах.");
+                help.SetToolTip(height, "Высота листа в миллиметрах.");
                 help.SetToolTip(spacing,
-                    "Minimum clearance between parts in millimeters. Use 0 when comparing with the SVGnest demo.");
+                    "Минимальный зазор между деталями, мм (min separation движка).");
                 help.SetToolTip(rotations,
-                    "Number of evenly spaced rotation variants, not degrees. 4 means 0, 90, 180, and 270 degrees.");
-                help.SetToolTip(populationSize, "Genetic population size. Larger values explore more candidates.");
-                help.SetToolTip(mutationRate, "Mutation probability in percent.");
-                help.SetToolTip(curveTolerance, "Geometry tolerance in millimeters.");
-                help.SetToolTip(timeRatio, "Weight of shared cutting-line length in fitness.");
-                help.SetToolTip(timeLimitSeconds, "0 means run until Stop; a positive value stops automatically.");
-                help.SetToolTip(mergeLines, "Reward placements that share compatible cutting lines.");
+                    "Число равномерных вариантов поворота, а не градусы. 4 = 0, 90, 180 и 270.");
+                help.SetToolTip(placementType,
+                    "Стратегия размещения: gravity — компактнее по ширине, box — меньше площадь описанного прямоугольника, convexhull — площадь оболочки.");
+                help.SetToolTip(populationSize, "Размер популяции генетического алгоритма. Больше — шире поиск.");
+                help.SetToolTip(mutationRate, "Вероятность мутации в процентах.");
+                help.SetToolTip(curveTolerance,
+                    "Точность сглаживания SVG, мм (входная геометрия).");
+                help.SetToolTip(timeRatio,
+                    "Вес длины общих линий реза в приспособленности: 0 — только материал, 1 — только время резки.");
+                help.SetToolTip(timeLimitSeconds,
+                    "0 — работать до кнопки «Стоп»; положительное значение — автостоп, сек.");
+                help.SetToolTip(mergeLines, "Поощрять раскладки с общими линиями реза.");
 
-                run.Text = "Run nesting";
+                run.Text = "Разложить";
                 run.Click += RunClick;
 
-                stop.Text = "Stop";
+                stop.Text = "Стоп";
                 stop.Enabled = false;
-                stop.Click += delegate { stopRequested = true; status.Text = "Stopping job..."; };
+                stop.Click += delegate { stopRequested = true; status.Text = "Остановка задачи..."; };
 
                 FormClosing += delegate(object sender, FormClosingEventArgs args)
                 {
@@ -677,31 +708,36 @@ namespace CorelDeepnest.Runtime
                     {
                         args.Cancel = true;
                         stopRequested = true;
-                        status.Text = "Stopping job before closing...";
+                        status.Text = "Остановка задачи перед закрытием...";
                     }
                 };
 
-                apply.Text = "Apply to CorelDRAW";
+                apply.Text = "Применить в CorelDRAW";
                 apply.Enabled = false;
                 apply.Click += ApplyClick;
 
-                var advancedButton = new Button { Text = "Settings ▸" };
+                var advancedButton = new Button { Text = "Настройки ▸" };
                 advancedButton.Click += delegate
                 {
                     advancedFields.Visible = !advancedFields.Visible;
                     advancedButton.Text = advancedFields.Visible
-                        ? "Settings ▾"
-                        : "Settings ▸";
+                        ? "Настройки ▾"
+                        : "Настройки ▸";
                 };
 
-                status.Text = "Select closed vector shapes, then run nesting.";
+                status.Text = "Выделите замкнутые векторные объекты и запустите раскладку.";
                 status.AutoSize = true;
-                status.Padding = new Padding(8, 8, 8, 8);
+                status.Padding = new Padding(8, 6, 0, 0);
+
+                tick.Interval = 250;
+                tick.Tick += delegate { RefreshRunningStatus(); };
 
                 var actions = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Top,
-                    Height = 42,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    WrapContents = false,
                     Padding = new Padding(8, 4, 8, 4)
                 };
                 actions.Controls.Add(run);
@@ -727,50 +763,158 @@ namespace CorelDeepnest.Runtime
                 stopRequested = false;
                 completedResult = null;
                 preview.Model = null;
-                status.Text = "Creating nesting job...";
+                runStartedUtc = System.DateTime.UtcNow;
+                runServerStartedUtc = null;
+                runLimitSeconds = 0;
+                lastIndex = 0;
+                lastFitness = 0;
+                lastPlaced = 0;
+                lastSheets = 0;
+                tick.Start();
+                status.Text = "Создание задачи...";
                 System.Windows.Forms.Application.DoEvents();
 
+                NestingOptions options = null;
+                string requestJson = null;
+                List<PreviewPart> previewParts = null;
                 try
                 {
-                    NestingOptions options = ReadOptions();
+                    // The Corel SVG export touches COM and must run on the UI
+                    // thread; the job HTTP polling runs off it.
+                    options = ReadOptions();
+                    runLimitSeconds = options.TimeLimitSeconds;
                     SaveSettings();
-                    JobRunResult jobResult = RunJob(
-                        gateway,
-                        options,
-                        delegate(string jobId) { status.Text = "Job " + jobId + " is running..."; },
-                        UpdateRunningResult,
-                        delegate { return stopRequested; });
-                    preview.Model = jobResult.Preview;
-                    completedResult = jobResult;
-                    apply.Enabled = jobResult.Preview.Placements.Count > 0;
-                    status.Text = "Best placement accepted: " +
-                        jobResult.Preview.Placements.Count + " part(s) on " +
-                        jobResult.Preview.SheetCount + " sheet(s).";
+                    requestJson = Json.Serialize(
+                        BuildRequest(gateway, options, out previewParts));
                 }
                 catch (Exception error)
                 {
-                    status.Text = error is OperationCanceledException ? "Job stopped." : "Job failed.";
-                    if (!(error is OperationCanceledException))
-                    {
-                        ShowError("Deepnest job failed", error);
-                    }
-                }
-                finally
-                {
+                    status.Text = "Не удалось подготовить задачу.";
+                    ShowError("Не удалось подготовить задачу", error);
                     run.Enabled = true;
                     stop.Enabled = false;
+                    tick.Stop();
+                    return;
                 }
+
+                System.Threading.Tasks.Task.Run(delegate
+                {
+                    try
+                    {
+                        JobRunResult jobResult = RunJob(
+                            requestJson,
+                            options,
+                            previewParts,
+                            delegate(string jobId)
+                            {
+                                Post((MethodInvoker)delegate
+                                {
+                                    status.Text = "Задача " + jobId + " выполняется...";
+                                });
+                            },
+                            delegate(JobRunResult result)
+                            {
+                                Post((MethodInvoker)delegate { UpdateRunningResult(result); });
+                            },
+                            delegate { return stopRequested; });
+                        Post((MethodInvoker)delegate { FinishRun(jobResult, null); });
+                    }
+                    catch (Exception error)
+                    {
+                        Post((MethodInvoker)delegate { FinishRun(null, error); });
+                    }
+                });
+            }
+
+            private void Post(MethodInvoker action)
+            {
+                try
+                {
+                    if (IsHandleCreated && !IsDisposed)
+                    {
+                        BeginInvoke(action);
+                    }
+                }
+                catch
+                {
+                    // The form is closing or already disposed; drop the update.
+                }
+            }
+
+            private void FinishRun(JobRunResult jobResult, Exception error)
+            {
+                if (error != null)
+                {
+                    status.Text = error is OperationCanceledException
+                        ? "Задача остановлена."
+                        : "Ошибка задачи.";
+                    if (!(error is OperationCanceledException))
+                    {
+                        ShowError("Ошибка задачи Deepnest", error);
+                    }
+                }
+                else if (jobResult != null)
+                {
+                    preview.Model = jobResult.Preview;
+                    completedResult = jobResult;
+                    apply.Enabled = jobResult.Preview.Placements.Count > 0;
+                    status.Text = "Принят лучший вариант: деталей — " +
+                        jobResult.Preview.Placements.Count + ", листов — " +
+                        jobResult.Preview.SheetCount + ".";
+                }
+
+                run.Enabled = true;
+                stop.Enabled = false;
+                tick.Stop();
             }
 
             private void UpdateRunningResult(JobRunResult jobResult)
             {
+                if (!string.IsNullOrEmpty(jobResult.StartedAt))
+                {
+                    System.DateTime serverStart;
+                    if (System.DateTime.TryParse(
+                        jobResult.StartedAt,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal |
+                            System.Globalization.DateTimeStyles.AssumeUniversal,
+                        out serverStart))
+                    {
+                        runServerStartedUtc = serverStart;
+                    }
+                }
+                lastIndex = jobResult.Index;
+                lastFitness = jobResult.Fitness;
+                lastPlaced = jobResult.Preview.Placements.Count;
+                lastSheets = jobResult.Preview.SheetCount;
                 preview.Model = jobResult.Preview;
                 completedResult = jobResult;
-                status.Text = "Searching: best candidate " + jobResult.Index +
-                    ", fitness " + jobResult.Fitness.ToString("0.###") +
-                    ", " + jobResult.Preview.Placements.Count + " part(s) on " +
-                    jobResult.Preview.SheetCount + " sheet(s). Press Stop to accept.";
-                System.Windows.Forms.Application.DoEvents();
+                RefreshRunningStatus();
+            }
+
+            private void RefreshRunningStatus()
+            {
+                System.DateTime baseUtc = runServerStartedUtc ?? runStartedUtc;
+                System.TimeSpan span = System.DateTime.UtcNow - baseUtc;
+                if (span < System.TimeSpan.Zero)
+                {
+                    span = System.TimeSpan.Zero;
+                }
+                int seconds = (int)System.Math.Floor(span.TotalSeconds);
+                status.Text = "вариант " + lastIndex +
+                    " · fitness " + lastFitness.ToString("0.###") +
+                    " · деталей " + lastPlaced +
+                    " · листов " + lastSheets + " · " +
+                    (runLimitSeconds > 0
+                        ? seconds + "/" + runLimitSeconds + " с"
+                        : FormatSeconds(seconds));
+            }
+
+            private static string FormatSeconds(int seconds)
+            {
+                return seconds < 60
+                    ? seconds + " с"
+                    : (seconds / 60) + ":" + (seconds % 60).ToString("00");
             }
 
             private void ApplyClick(object sender, EventArgs e)
@@ -806,14 +950,14 @@ namespace CorelDeepnest.Runtime
                             { "placements", placements.ToArray() }
                         }));
                     var applied = Json.Deserialize<Dictionary<string, object>>(response);
-                    status.Text = "Applied " + Convert.ToInt32(applied["applied"]) +
-                        " part(s) on " + Convert.ToInt32(applied["sheets"]) +
-                        " sheet(s), layer " + Convert.ToString(applied["layer"]) + ".";
+                    status.Text = "Применено деталей — " + Convert.ToInt32(applied["applied"]) +
+                        ", листов — " + Convert.ToInt32(applied["sheets"]) +
+                        ", слой " + Convert.ToString(applied["layer"]) + ".";
                 }
                 catch (Exception error)
                 {
-                    status.Text = "Could not apply placements.";
-                    ShowError("Applying placements failed", error);
+                    status.Text = "Не удалось применить размещение.";
+                    ShowError("Ошибка применения размещения", error);
                     apply.Enabled = true;
                 }
             }
@@ -858,19 +1002,12 @@ namespace CorelDeepnest.Runtime
                     SetNumber(values, "timeRatio", timeRatio);
                     SetNumber(values, "timeLimitSeconds", timeLimitSeconds);
 
-                    object value;
-                    if (values.TryGetValue("placementType", out value))
+                    SetCombo(values, "placementType", placementType);
+                    object mergeValue;
+                    if (values.TryGetValue("mergeLines", out mergeValue) &&
+                        mergeValue != null)
                     {
-                        string selected = Convert.ToString(value);
-                        int index = placementType.Items.IndexOf(selected);
-                        if (index >= 0)
-                        {
-                            placementType.SelectedIndex = index;
-                        }
-                    }
-                    if (values.TryGetValue("mergeLines", out value))
-                    {
-                        mergeLines.Checked = Convert.ToBoolean(value);
+                        mergeLines.Checked = Convert.ToBoolean(mergeValue);
                     }
                 }
                 catch
@@ -921,6 +1058,22 @@ namespace CorelDeepnest.Runtime
                     Math.Max(control.Minimum, number));
             }
 
+            private static void SetCombo(Dictionary<string, object> values,
+                string name, ComboBox control)
+            {
+                object value;
+                if (!values.TryGetValue(name, out value) || value == null)
+                {
+                    return;
+                }
+
+                int index = control.Items.IndexOf(Convert.ToString(value));
+                if (index >= 0)
+                {
+                    control.SelectedIndex = index;
+                }
+            }
+
             private static string SettingsPath()
             {
                 return Path.Combine(
@@ -964,6 +1117,9 @@ namespace CorelDeepnest.Runtime
 
         private sealed class PreviewPanel : Panel
         {
+            private const float MarginSize = 24f;
+            private const float SheetGapPx = 16f;
+
             private PreviewModel model;
 
             public PreviewModel Model
@@ -977,6 +1133,13 @@ namespace CorelDeepnest.Runtime
                 Dock = DockStyle.Fill;
                 BackColor = DrawingColor.FromArgb(36, 39, 44);
                 DoubleBuffered = true;
+                AutoScroll = true;
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                Invalidate();
             }
 
             protected override void OnPaint(PaintEventArgs e)
@@ -988,25 +1151,43 @@ namespace CorelDeepnest.Runtime
                 {
                     using (Brush textBrush = new SolidBrush(DrawingColor.Gainsboro))
                     {
-                        e.Graphics.DrawString("The placement preview will appear here.",
+                        e.Graphics.DrawString("Здесь появится предпросмотр раскладки.",
                             Font, textBrush, 16, 16);
                     }
                     return;
                 }
 
-                const float margin = 24;
                 int sheetCount = Math.Max(1, model.SheetCount);
-                double totalModelWidth = model.SheetWidth * sheetCount +
-                    model.SheetGap * (sheetCount - 1);
-                float scale = Math.Min(
-                    (ClientSize.Width - margin * 2) / (float)totalModelWidth,
-                    (ClientSize.Height - margin * 2) / (float)model.SheetHeight);
-                float sheetWidth = (float)model.SheetWidth * scale;
+
+                // Each sheet is stretched to the full available height and the
+                // sheets are laid out in a single row; the panel scrolls
+                // horizontally when they do not all fit.
+                float availableHeight = Math.Max(1f, ClientSize.Height - MarginSize * 2);
+                float scale = availableHeight / (float)model.SheetHeight;
+                if (!(scale > 0f))
+                {
+                    scale = 1f;
+                }
                 float sheetHeight = (float)model.SheetHeight * scale;
-                float sheetGap = (float)model.SheetGap * scale;
-                float totalWidth = sheetWidth * sheetCount + sheetGap * (sheetCount - 1);
-                float originX = (ClientSize.Width - totalWidth) / 2;
-                float originY = (ClientSize.Height - sheetHeight) / 2;
+                float sheetWidth = (float)model.SheetWidth * scale;
+
+                var origins = new System.Drawing.PointF[sheetCount];
+                for (int sheetIndex = 0; sheetIndex < sheetCount; sheetIndex++)
+                {
+                    float x = MarginSize + sheetIndex * (sheetWidth + SheetGapPx);
+                    origins[sheetIndex] = new System.Drawing.PointF(x, MarginSize);
+                }
+                float contentWidth = MarginSize * 2 + sheetCount * sheetWidth +
+                    (sheetCount - 1) * SheetGapPx;
+
+                var desired = new System.Drawing.Size((int)Math.Ceiling(contentWidth), 0);
+                if (AutoScrollMinSize != desired)
+                {
+                    AutoScrollMinSize = desired;
+                }
+
+                // Draw in scrollable (virtual) coordinates.
+                e.Graphics.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
 
                 using (Brush sheetBrush = new SolidBrush(DrawingColor.WhiteSmoke))
                 using (Pen sheetPen = new Pen(DrawingColor.Silver, 2))
@@ -1014,14 +1195,14 @@ namespace CorelDeepnest.Runtime
                 {
                     for (int sheetIndex = 0; sheetIndex < sheetCount; sheetIndex++)
                     {
-                        float sheetX = originX + sheetIndex * (sheetWidth + sheetGap);
+                        System.Drawing.PointF origin = origins[sheetIndex];
                         e.Graphics.FillRectangle(
-                            sheetBrush, sheetX, originY, sheetWidth, sheetHeight);
+                            sheetBrush, origin.X, origin.Y, sheetWidth, sheetHeight);
                         e.Graphics.DrawRectangle(
-                            sheetPen, sheetX, originY, sheetWidth, sheetHeight);
+                            sheetPen, origin.X, origin.Y, sheetWidth, sheetHeight);
                         e.Graphics.DrawString(
-                            "Sheet " + (sheetIndex + 1), Font, sheetLabelBrush,
-                            sheetX + 6, originY + 6);
+                            "Лист " + (sheetIndex + 1), Font, sheetLabelBrush,
+                            origin.X + 6, origin.Y + 6);
                     }
                 }
 
@@ -1045,11 +1226,16 @@ namespace CorelDeepnest.Runtime
                         continue;
                     }
 
+                    int sheetSlot = placement.SheetInstanceId >= 0 &&
+                        placement.SheetInstanceId < origins.Length
+                        ? placement.SheetInstanceId
+                        : 0;
+                    float placementSheetX = origins[sheetSlot].X;
+                    float placementSheetY = origins[sheetSlot].Y;
+
                     double radians = placement.Rotation * Math.PI / 180.0;
                     double cos = Math.Cos(radians);
                     double sin = Math.Sin(radians);
-                    float placementSheetX = originX + placement.SheetInstanceId *
-                        (sheetWidth + sheetGap);
                     DrawingColor color = colors[placementIndex % colors.Length];
                     using (Brush fill = new SolidBrush(color))
                     using (Pen outline = new Pen(
@@ -1070,12 +1256,12 @@ namespace CorelDeepnest.Runtime
                             }
                             path.AddPolygon(TransformPolygon(
                                 contour.Points, cos, sin, placement, placementSheetX,
-                                originY, sheetHeight, scale));
+                                placementSheetY, sheetHeight, scale));
                             foreach (List<GeometryPoint> hole in contour.Holes)
                             {
                                 path.AddPolygon(TransformPolygon(
                                     hole, cos, sin, placement, placementSheetX,
-                                    originY, sheetHeight, scale));
+                                    placementSheetY, sheetHeight, scale));
                             }
                         }
                         if (path.PointCount == 0)

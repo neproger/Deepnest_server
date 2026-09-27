@@ -1591,3 +1591,48 @@ Corel DTO, stable ids и auto-sheets.
 - Переполненные задачи: первый результат ≈1.5с (preview), уточнение `fast`
   зависит от геометрии (секунды).
 
+---
+
+## 2026-09-27 — Возврат движка Deepnest (ironnest понижен до опционального)
+
+### Причина
+
+ironnest не подошёл по критериям продакшена: на переполненной задаче (52
+детали, лист 500×1000, spacing 20) первый `fast`-результат приходит только
+через ~55–60с, а `max`/`full` — ещё дольше; стриминга промежуточных раскладок
+нет; отверстия в деталях не моделируются (у букв «залиты» счётчики). В реальной
+работе это означает простой.
+
+### Что сделано
+
+- Из коммита `b900181` (до замены) восстановлен оригинальный движок Deepnest:
+  `main/background.js`, `main/processPair.mjs`, `main/processPairs.node.mjs`,
+  `main/nestingToSVG.mjs`, полный `main/deepnest.js`,
+  `main/util/{d3-polygon,simplify}.js`, C++ addon (`binding.gyp`, `src/addon.cc`,
+  `src/minkowski.cc`, `src/polygon/`), тесты `native-addon`/`geometry`/`winding`.
+- `src/geometry/engine.mjs`: **Deepnest снова по умолчанию**;
+  `DEEPNEST_ENGINE=ironnest` — опциональный режим. WASM-движок не возвращаем.
+- `src/jobs/input.mjs`, `index.mjs`: возвращён рендер `nestingToSVG` (снова
+  работает `GET /result.svg` для SVG-входа).
+- `package.json`: возвращены `gypfile`, `nan`, `bindings`, скрипт `configure`.
+- `npm install` пересобрал native addon `build/Release/addon.node` (node-gyp).
+- Corel-форма: настройки возвращены к Deepnest (Размещение/Популяция/Мутация/
+  Точность/Вес линий/Объединять линии/Лимит); сохранены UX-правки (мгновенный
+  Стоп, асинхронный поллинг, таймер+fitness+счётчики в статусе, предпросмотр в
+  один ряд с горизонтальным скроллом). Метрика в статусе — `fitness`.
+- Доки: `README.md`, `docs/GEOMETRY_PIPELINE.md`, `docs/PROJECT_VISION.md`,
+  `LICENSES.md`, `corel_addon/{README,BUILD}.md` возвращены к Deepnest-версии;
+  `docs/IRONNEST_ENGINE.md` помечен как опциональный.
+
+### Проверки
+
+- `npm test` — **51/51**.
+- E2E на Deepnest: стриминг улучшений (index 1→2→3 за 0.5–0.7с).
+- Corel-аддон собран (`build-addon.ps1`, MSBuild exit 0).
+
+### Known limitations
+
+- Опциональный ironnest оставлен (`native/`, `npm run engine:build`); по
+  умолчанию не используется.
+
+

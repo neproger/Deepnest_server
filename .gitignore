@@ -3,8 +3,11 @@
 /workspace.xml
 .DS_Store
 /node_modules
+/build
 /dist
 /bin
+/minkowski
+/deepnest-*win32-x64
 /output
 # package-lock.json
 git_token.rtf

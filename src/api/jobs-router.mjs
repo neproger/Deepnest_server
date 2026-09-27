@@ -49,6 +49,8 @@ export function createJobsRouter(manager) {
         jobStatus: job.status,
         placementComplete: job.placementComplete,
         updatedAt: job.resultUpdatedAt,
+        startedAt: job.startedAt,
+        progress: job.progress,
         ...job.result,
       });
     } catch (error) {

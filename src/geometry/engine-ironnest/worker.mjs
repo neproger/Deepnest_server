@@ -28,6 +28,7 @@ const {
   minSep,
   rotations,
   budget,
+  restarts,
   strategy,
   separationEffort,
   columnWeight,
@@ -64,7 +65,7 @@ function requestFor(seed, effort) {
     rotations,
     seed,
     budget,
-    restarts: 1,
+    restarts,
     strategy,
     separation_effort: effort,
     column_weight: columnWeight,
@@ -162,11 +163,13 @@ async function main() {
 
   try {
     do {
-      // Iteration 0 is a cheap construction-only preview (`off`): it skips the
-      // separation tail so a first layout is available almost immediately. Later
-      // iterations run the configured effort (starting from the canonical seed)
-      // and only supersede it on improvement.
-      const effort = iteration === 0 ? "off" : separationEffort;
+      // Progressive effort: iteration 0 is a cheap construction-only preview
+      // (`off`) so a first layout appears almost immediately; iteration 1 runs a
+      // quick `fast` pass for a solid layout early; later iterations run the
+      // caller-selected effort (e.g. `max`/`full`) to refine. Each seed's result
+      // is forwarded only when it improves on the best so far.
+      const effort =
+        iteration === 0 ? "off" : iteration === 1 ? "fast" : separationEffort;
       const seed = iteration === 0 ? baseSeed : baseSeed + (iteration - 1);
       const raw = JSON.parse(addon.nestMulti(requestFor(seed, effort)));
       const candidate = score(raw);

@@ -40,9 +40,15 @@ several outer roots, their result ids are `part-N#1`, `part-N#2`, and so on.
 
 The form:
 
-- polls the current best result every 200 ms;
-- renders parts, holes, rotations, and multiple sheet instances;
+- polls the current best result every 200 ms off the UI thread (updates are
+  marshalled back to the form), so the UI stays responsive;
+- shows a compact status line with the best-variant index, density, part and sheet
+  counts, and elapsed time (the engine reports no solve percentage);
+- renders parts, holes, rotations, and multiple sheet instances in a single row
+  (each sheet stretched to the full available height) with horizontal scrolling;
 - keeps searching until **Stop** or the configured time limit;
+- stops instantly: the stop request is sent asynchronously and the server
+  acknowledges it immediately, tearing the engine down in the background;
 - saves the last entered settings;
 - can apply single-root results to a new `Deepnest Result HHmmss` layer;
 - groups the complete Apply operation into one CorelDRAW undo step.
@@ -101,13 +107,16 @@ The compact row contains:
 - spacing in millimeters;
 - rotation variant count (`4` means 0°, 90°, 180°, and 270°).
 
-The expandable settings row contains:
+The expandable settings row contains the Deepnest engine settings:
 
-- placement strategy;
-- population size and mutation rate;
-- SVG curve tolerance;
-- shared-line fitness weight (`timeRatio`) and line merging;
-- optional automatic time limit.
+- **Placement** — `gravity` (compact width), `box` (bounding-box area), or
+  `convexhull` (hull area);
+- **Population** — genetic population size;
+- **Mutation, %** — mutation probability;
+- **Tolerance, mm** — SVG flattening tolerance;
+- **Line weight** — shared cutting-line weight in fitness (`timeRatio`);
+- **Merge lines** — reward placements that share compatible cutting lines;
+- **Limit, sec** — optional automatic stop (`0` = run until Stop).
 
 Settings are stored in:
 
@@ -115,8 +124,7 @@ Settings are stored in:
 %LOCALAPPDATA%\CorelDeepnest\settings.json
 ```
 
-Obsolete `inputFormat` and `corelCurvePrecision` values from older settings
-files are ignored.
+Obsolete keys from older settings files are ignored.
 
 ## SVG diagnostics
 

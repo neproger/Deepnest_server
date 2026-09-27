@@ -177,11 +177,10 @@ test("creates a job, exposes lifecycle/result with stable ids", async () => {
     { message: "placementComplete never became true" }
   );
 
-  // No server-side SVG renderer: the structured result is the contract, and
-  // any input format reports the SVG result as unavailable.
-  const svg = await getJson(`/api/v1/jobs/${id}/result.svg`);
-  assert.equal(svg.status, 400);
-  assert.equal(svg.json.error.code, "RESULT_FORMAT_UNAVAILABLE");
+  const svg = await fetch(`${base}/api/v1/jobs/${id}/result.svg`);
+  assert.equal(svg.status, 200);
+  assert.match(svg.headers.get("content-type") || "", /svg/);
+  assert.ok((await svg.text()).includes("<svg"));
 
   const stopRes = await stopJob(id);
   assert.equal(stopRes.status, 200);
@@ -975,6 +974,54 @@ test("geometry input: auto sheet mode expands to as many instances as needed", a
   assert.deepEqual(result.sheetsUsed, [
     { sheetId: "auto-sheet", instancesUsed: 2 },
   ]);
+
+  await stopJob(id);
+  await waitFor(async () => (await statusOf(id)) === "stopped");
+  await deleteJob(id);
+});
+
+test("validates and accepts ironnest-native engine config", async () => {
+  const badStrategy = await createJob(
+    geometryBody([geoPart("g")], { config: { strategy: "nope" } })
+  );
+  assert.equal(badStrategy.status, 400);
+  assert.equal(badStrategy.json.error.code, "INVALID_CONFIG");
+
+  const badEffort = await createJob(
+    geometryBody([geoPart("g")], { config: { separationEffort: "off" } })
+  );
+  assert.equal(badEffort.status, 400);
+  assert.equal(badEffort.json.error.code, "INVALID_CONFIG");
+
+  const badBudget = await createJob(
+    geometryBody([geoPart("g")], { config: { budget: 0 } })
+  );
+  assert.equal(badBudget.status, 400);
+
+  const badRotations = await createJob(
+    geometryBody([geoPart("g")], { config: { rotations: 0 } })
+  );
+  assert.equal(badRotations.status, 400);
+
+  const created = await createJob(
+    geometryBody([geoPart("g")], {
+      config: {
+        spacing: 0,
+        strategy: "sampling",
+        separationEffort: "fast",
+        budget: 200,
+        restarts: 1,
+        columnWeight: 3,
+      },
+    })
+  );
+  assert.equal(created.status, 202);
+  const id = created.json.jobId;
+  const result = await waitFor(async () => {
+    const res = await getJson(`/api/v1/jobs/${id}/result`);
+    return res.status === 200 ? res.json : null;
+  }, { message: "no result for native config" });
+  assert.equal(result.placements.length, 1);
 
   await stopJob(id);
   await waitFor(async () => (await statusOf(id)) === "stopped");

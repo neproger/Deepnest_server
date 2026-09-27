@@ -168,24 +168,27 @@ export class Job {
     }
     clearTimeout(this.timer);
     this.timer = null;
-    // Set terminal status before awaiting abort so late engine messages are ignored.
+    // Terminal status is set before abort so late engine messages are ignored
+    // and the HTTP response can report the final state immediately.
     this.status = finalStatus;
     this.finishedAt = new Date().toISOString();
-
-    const abort = this.abort;
-    this.abort = null;
-    if (abort) {
-      try {
-        await abort();
-      } catch {
-        // best-effort shutdown
-      }
-    }
 
     this.emit(
       finalStatus === "completed" ? "job.completed" : "job.stopped",
       { jobId: this.id, status: finalStatus }
     );
+
+    // Tear the engine worker down in the background. `worker.terminate()` waits
+    // for an in-flight native solve to return, which can take seconds; the HTTP
+    // stop request and the client UI must not block on it. The concurrency slot
+    // is released right away and the old worker finishes on its own.
+    const abort = this.abort;
+    this.abort = null;
+    if (abort) {
+      Promise.resolve()
+        .then(() => abort())
+        .catch(() => {});
+    }
     this.manager.onJobFinished(this);
   }
 

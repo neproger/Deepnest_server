@@ -16,6 +16,10 @@ import { parseSvgInput } from "../geometry/svg-adapter.mjs";
 const MAX_SVG_BYTES = 10 * 1024 * 1024;
 const RESERVED_CONFIG_KEYS = ["bin", "progressCallback", "timeout"];
 
+// ironnest-native engine options accepted through `config`.
+const ENGINE_STRATEGIES = new Set(["sampling", "nfp"]);
+const ENGINE_EFFORTS = new Set(["full", "fast", "max"]);
+
 export function httpError(status, code, message) {
   const error = new Error(message);
   error.status = status;
@@ -62,7 +66,77 @@ function validateConfig(config) {
       );
     }
   }
+  validateNativeConfig(config || {});
   return config || {};
+}
+
+function requireNumber(config, key, { min, exclusiveMin, integer } = {}) {
+  if (!Object.prototype.hasOwnProperty.call(config, key)) {
+    return;
+  }
+  const value = config[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw httpError(400, "INVALID_CONFIG", `config.${key} must be a finite number`);
+  }
+  if (integer && !Number.isInteger(value)) {
+    throw httpError(400, "INVALID_CONFIG", `config.${key} must be an integer`);
+  }
+  if (min !== undefined && value < min) {
+    throw httpError(400, "INVALID_CONFIG", `config.${key} must be >= ${min}`);
+  }
+  if (exclusiveMin !== undefined && value <= exclusiveMin) {
+    throw httpError(400, "INVALID_CONFIG", `config.${key} must be > ${exclusiveMin}`);
+  }
+}
+
+/**
+ * Validate the ironnest-native engine options. Unknown keys are ignored (the
+ * engine does not consume them), but the recognized ones are checked so a bad
+ * value produces a 400 instead of a failed job.
+ */
+function validateNativeConfig(config) {
+  if (config.strategy !== undefined && !ENGINE_STRATEGIES.has(config.strategy)) {
+    throw httpError(
+      400,
+      "INVALID_CONFIG",
+      'config.strategy must be "sampling" or "nfp"'
+    );
+  }
+  if (
+    config.separationEffort !== undefined &&
+    !ENGINE_EFFORTS.has(config.separationEffort)
+  ) {
+    throw httpError(
+      400,
+      "INVALID_CONFIG",
+      'config.separationEffort must be "full", "fast" or "max"'
+    );
+  }
+  if (config.rotations !== undefined) {
+    if (Array.isArray(config.rotations)) {
+      if (
+        config.rotations.length === 0 ||
+        config.rotations.some(
+          (angle) => typeof angle !== "number" || !Number.isFinite(angle)
+        )
+      ) {
+        throw httpError(
+          400,
+          "INVALID_CONFIG",
+          "config.rotations must be a non-empty array of finite angles"
+        );
+      }
+    } else {
+      requireNumber(config, "rotations", { min: 1, integer: true });
+    }
+  }
+  requireNumber(config, "spacing", { min: 0 });
+  requireNumber(config, "curveTolerance", { exclusiveMin: 0 });
+  requireNumber(config, "scale", { exclusiveMin: 0 });
+  requireNumber(config, "budget", { min: 1, integer: true });
+  requireNumber(config, "restarts", { min: 1, integer: true });
+  requireNumber(config, "columnWeight", { min: 1, integer: true });
+  requireNumber(config, "seed", { min: 0, integer: true });
 }
 
 function validateExecution(execution) {
@@ -309,6 +383,9 @@ export async function adaptInput(spec) {
   sheet.quantity = spec.bin.mode === "auto"
     ? geometry.parts.reduce((sum, part) => sum + part.quantity, 0)
     : spec.bin.quantity;
+  // Renderer is SVG-specific and loaded only on this path (Deepnest engine).
+  const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
+  renderContext.render = nestingToSVG;
 
   return { geometry, renderContext, engineOptions: svgEngineOptions(spec) };
 }

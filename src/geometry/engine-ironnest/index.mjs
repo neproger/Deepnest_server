@@ -87,6 +87,7 @@ export async function nestGeometryIronnest(geometry, callback, options = {}) {
   const total = qty.reduce((sum, value) => sum + value, 0);
   const rotations = [rotationAngles(options.rotations ?? 4)];
   const budget = Math.max(1, Math.round(options.budget ?? 1000));
+  const restarts = Math.max(1, Math.round(options.restarts ?? 1));
   const seed = Number.isFinite(options.seed) ? Math.round(options.seed) : 1;
 
   const worker = new Worker(new URL("./worker.mjs", import.meta.url), {
@@ -100,6 +101,7 @@ export async function nestGeometryIronnest(geometry, callback, options = {}) {
       minSep: options.spacing ?? 0,
       rotations,
       budget,
+      restarts,
       strategy: options.strategy,
       // Default to the Fast separation tail: on real Corel jobs the "full"
       // leftover tail dominates the wall clock (measured ~7x slower on a

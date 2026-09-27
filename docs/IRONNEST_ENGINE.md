@@ -1,9 +1,10 @@
-# Nesting engine — ironnest (Rust)
+# Nesting engine — ironnest (Rust, optional)
 
-Status of the nesting engine. ironnest is the **only** engine: the original
-Deepnest GA / native-NFP engine and the SVGnest WASM core have been removed.
-
-## What it is
+> **Status:** ironnest is an **optional, non-default** engine. The default engine
+> is the original Deepnest engine (see [GEOMETRY_PIPELINE.md](GEOMETRY_PIPELINE.md)).
+> Select ironnest with `DEEPNEST_ENGINE=ironnest` and build it with
+> `npm run engine:build`. It was evaluated but is slower to converge on
+> over-subscribed jobs and does not model holes inside a part.
 
 [`ironnest`](https://github.com/TexasCoding/ironnest) is a deterministic,
 embeddable 2D true-shape nesting engine: a fork-and-extend of
@@ -100,6 +101,7 @@ still interrupts an in-flight solve.
 | `spacing` | minimum separation (`min_sep`), in canonical units |
 | `rotations` | a count (`4` → `0/90/180/270`) or an explicit angle list |
 | `budget` | samples per item placement (default `1000`) |
+| `restarts` | best-of-K multi-start per sheet (default `1`) |
 | `strategy` | `"sampling"` (default) or `"nfp"` |
 | `separationEffort` | `"full"`, `"fast"` (default), `"max"`, `"off"` |
 | `columnWeight` | NFP LBF horizontal weight |

@@ -2,6 +2,10 @@
 (newest on top, breaking changes)
 
 
+2026-09-27 restore the original Deepnest engine (JavaScript + native Minkowski NFP
+           addon) as the default; keep ironnest as an optional engine behind
+           `DEEPNEST_ENGINE=ironnest`; the WASM core stays removed.
+           `GET /result.svg` works again for SVG input.
 2026-09-27 replace the nesting engine with `ironnest` (Rust, native Node-API addon)
            removed the original Deepnest GA/native-NFP engine, the SVGnest WASM
            core, the C++ Minkowski addon and the server-side SVG renderer;

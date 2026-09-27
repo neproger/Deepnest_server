@@ -1,3 +1,4 @@
+import { nestingToSVG } from "./main/nestingToSVG.mjs";
 import { parseSvgInput } from "./src/geometry/svg-adapter.mjs";
 import { nestGeometry, nestWithRender } from "./src/geometry/engine.mjs";
 
@@ -20,6 +21,7 @@ export async function nest(svgInput, callback, options = {}) {
   const ratio = units === "mm" ? 1 / 25.4 : 1;
 
   const { geometry, renderContext } = await parseSvgInput(svgInput, options);
+  renderContext.render = nestingToSVG;
 
   return nestWithRender(geometry, renderContext, callback, {
     ...options,
