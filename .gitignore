@@ -4,7 +4,8 @@
 .DS_Store
 /node_modules
 /build
-/dist
+/dist/*
+!/dist/DeepnestCorel/
 /bin
 /minkowski
 /deepnest-*win32-x64

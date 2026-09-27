@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -116,8 +117,201 @@ namespace CorelDeepnest.Runtime
             throw new InvalidOperationException("Неизвестная команда CorelDeepnest: " + command);
         }
 
+        private static bool IsServerHealthy()
+        {
+            try
+            {
+                using (HttpResponseMessage response =
+                    Http.GetAsync("health").GetAwaiter().GetResult())
+                {
+                    return response.IsSuccessStatusCode;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ServerPathFile()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CorelDeepnest",
+                "server-path.txt");
+        }
+
+        /// <summary>
+        /// The server folder the package extracted (see VstaLoader), if present.
+        /// This is what makes the addon self-contained: no folder to choose.
+        /// </summary>
+        private static string ProvisionedServerDirectory()
+        {
+            try
+            {
+                string root = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "CorelDeepnest",
+                    "Server");
+                string pointer = Path.Combine(root, "current.txt");
+                if (!File.Exists(pointer))
+                {
+                    return null;
+                }
+                string version = File.ReadAllText(pointer).Trim();
+                if (string.IsNullOrEmpty(version) || Path.GetFileName(version) != version)
+                {
+                    return null;
+                }
+                string directory = Path.Combine(root, version);
+                return IsServerFolder(directory) ? directory : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool IsServerFolder(string directory)
+        {
+            return !string.IsNullOrEmpty(directory) &&
+                File.Exists(Path.Combine(directory, "node.exe")) &&
+                File.Exists(Path.Combine(directory, "server.mjs"));
+        }
+
+        /// <summary>
+        /// Accepts either the `server` folder itself or a parent that contains a
+        /// `server` subfolder (e.g. the distributed DeepnestCorel folder).
+        /// </summary>
+        private static string NormalizeServerDirectory(string directory)
+        {
+            if (IsServerFolder(directory))
+            {
+                return directory;
+            }
+            if (!string.IsNullOrEmpty(directory))
+            {
+                string nested = Path.Combine(directory, "server");
+                if (IsServerFolder(nested))
+                {
+                    return nested;
+                }
+            }
+            return null;
+        }
+
+        private static string SavedServerDirectory()
+        {
+            try
+            {
+                string path = ServerPathFile();
+                return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void SaveServerDirectory(string directory)
+        {
+            try
+            {
+                string path = ServerPathFile();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, directory);
+            }
+            catch
+            {
+                // The server still runs for this session even if the path is not saved.
+            }
+        }
+
+        /// <summary>
+        /// Ensures the Deepnest server is running; starts it from the saved (or
+        /// user-chosen) folder if it is not. Returns false with a message on
+        /// failure. Must be called on the UI thread (folder picker).
+        /// </summary>
+        private static bool EnsureServerRunning(out string error)
+        {
+            error = null;
+            if (IsServerHealthy())
+            {
+                return true;
+            }
+
+            string directory = ProvisionedServerDirectory();
+            if (directory == null)
+            {
+                directory = NormalizeServerDirectory(SavedServerDirectory());
+            }
+            if (directory == null)
+            {
+                using (var dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description =
+                        "Укажите папку DeepnestCorel (или её подпапку «server»): " +
+                        "в ней node.exe и server.mjs.";
+                    dialog.ShowNewFolderButton = false;
+                    if (dialog.ShowDialog() != DialogResult.OK)
+                    {
+                        error = "Папка сервера не выбрана.";
+                        return false;
+                    }
+                    directory = NormalizeServerDirectory(dialog.SelectedPath);
+                }
+                if (directory == null)
+                {
+                    error = "В выбранной папке нет node.exe и server.mjs.";
+                    return false;
+                }
+                SaveServerDirectory(directory);
+            }
+
+            try
+            {
+                var startInfo = new ProcessStartInfo(
+                    Path.Combine(directory, "node.exe"),
+                    "\"" + Path.Combine(directory, "server.mjs") + "\"")
+                {
+                    WorkingDirectory = directory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                Process.Start(startInfo);
+            }
+            catch (Exception startError)
+            {
+                error = "Не удалось запустить сервер: " + startError.Message;
+                return false;
+            }
+
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                if (IsServerHealthy())
+                {
+                    return true;
+                }
+                Thread.Sleep(200);
+            }
+            error = "Сервер не ответил на http://127.0.0.1:8080/health.";
+            return false;
+        }
+
         private static void TestDeepnestConnection()
         {
+            string error;
+            if (!EnsureServerRunning(out error))
+            {
+                MessageBox.Show(
+                    "Сервер Deepnest не запущен." + Environment.NewLine +
+                    Environment.NewLine + error,
+                    "CorelDeepnest",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
             try
             {
                 MessageBox.Show(
@@ -127,9 +321,9 @@ namespace CorelDeepnest.Runtime
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
-            catch (Exception error)
+            catch (Exception connectionError)
             {
-                ShowError("Не удалось подключиться к Deepnest Server", error);
+                ShowError("Не удалось подключиться к Deepnest Server", connectionError);
             }
         }
 
@@ -779,6 +973,15 @@ namespace CorelDeepnest.Runtime
                 List<PreviewPart> previewParts = null;
                 try
                 {
+                    // Make sure the bundled server is running (start it from the
+                    // folder next to the plugin if needed).
+                    string serverError;
+                    if (!EnsureServerRunning(out serverError))
+                    {
+                        throw new InvalidOperationException(
+                            "Сервер Deepnest не запущен. " + serverError);
+                    }
+
                     // The Corel SVG export touches COM and must run on the UI
                     // thread; the job HTTP polling runs off it.
                     options = ReadOptions();

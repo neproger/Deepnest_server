@@ -99,6 +99,30 @@ command list, or the `.CGSaddon` package itself.
 See [`BUILD.md`](BUILD.md) for the verified setup, cache behavior, package
 layout, and troubleshooting steps.
 
+## Distribution (end-user install)
+
+`build-distribution.ps1` (repository root) produces:
+
+```text
+dist\DeepnestCorel\
+  CorelDeepnest.CGSaddon     the VSTA addon, with the whole server embedded
+  README.txt
+```
+
+The `.CGSaddon` embeds the Node server (`server.zip`) next to the Runtime and
+Contracts. On the first command the loader extracts the server to
+`%LOCALAPPDATA%\CorelDeepnest\Server\<hash>` and the addon starts
+`node.exe server.mjs` from there (after checking `http://127.0.0.1:8080/health`).
+The end user only loads `CorelDeepnest.CGSaddon` in CorelDRAW (Scripts docker →
+Visual Studio Tools for Applications → Load): no Node install, no folder to
+choose, no manual server start.
+
+(A folder-picker fallback remains for development packages without an embedded
+server; the distributed package never needs it.)
+
+See [../docs/DISTRIBUTION.md](../docs/DISTRIBUTION.md) for the full build and
+release notes.
+
 ## Settings
 
 The compact row contains:

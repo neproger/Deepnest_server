@@ -4,6 +4,9 @@ This document records the working CorelDRAW 2025 VSTA workflow verified on
 CorelDRAW 26.1.0.143. Follow it instead of constructing a `.CGSaddon` archive
 from scratch.
 
+> For the **end-user distribution** (server embedded in the addon, one-step
+> install), see [../docs/DISTRIBUTION.md](../docs/DISTRIBUTION.md).
+
 ## Verified architecture
 
 ```text

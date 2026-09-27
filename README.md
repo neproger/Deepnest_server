@@ -30,6 +30,13 @@ native Node-API addon), can be selected with `DEEPNEST_ENGINE=ironnest` after
 building it with `npm run engine:build`. It is slower to converge on
 over-subscribed jobs and does not model holes inside a part.
 
+### End-user distribution
+
+`build-distribution.ps1` builds a self-contained CorelDRAW folder
+(`dist\DeepnestCorel`) with the server embedded inside the addon, so the user
+only loads the `.CGSaddon` — no Node install, no server to start. See
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
 ## Fork History
 
 This repo was forked from [deepnest-io](https://github.com/deepnest-io/Deepnest) in order to make Deepnest work on node, decoupled from the electron app, refer to the [example](server.mjs).

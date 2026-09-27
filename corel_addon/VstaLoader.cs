@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Windows.Forms;
 using Corel.Interop.VGCore;
 
@@ -55,6 +57,8 @@ namespace CorelDeepnest
                     runtimePath = Path.Combine(
                         runtimeDirectory, runtimeVersion, "CorelDeepnest.Runtime.dll");
                 }
+
+                InstallBundledServer();
 
                 runtimeDomain = AppDomain.CreateDomain(
                     "CorelDeepnest.Runtime." + Guid.NewGuid().ToString("N"),
@@ -141,6 +145,83 @@ namespace CorelDeepnest
             catch
             {
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Extracts the bundled server (server.zip, optional) to a per-version
+        /// directory under %LOCALAPPDATA%\CorelDeepnest\Server and points
+        /// current.txt at it. The addon then starts node.exe from there, so no
+        /// folder has to be chosen. No-op when the package carries no server.zip.
+        /// </summary>
+        private static void InstallBundledServer()
+        {
+            using (Stream source = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("server.zip"))
+            {
+                if (source == null)
+                {
+                    return;
+                }
+
+                byte[] bytes;
+                using (var buffer = new MemoryStream())
+                {
+                    source.CopyTo(buffer);
+                    bytes = buffer.ToArray();
+                }
+
+                string hash;
+                using (SHA256 sha = SHA256.Create())
+                {
+                    hash = BitConverter.ToString(sha.ComputeHash(bytes))
+                        .Replace("-", string.Empty).Substring(0, 16).ToLowerInvariant();
+                }
+
+                string root = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "CorelDeepnest",
+                    "Server");
+                string directory = Path.Combine(root, hash);
+                string pointer = Path.Combine(root, "current.txt");
+                if (File.Exists(pointer) &&
+                    File.ReadAllText(pointer).Trim() == hash &&
+                    File.Exists(Path.Combine(directory, "node.exe")))
+                {
+                    return;
+                }
+
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, true);
+                }
+                Directory.CreateDirectory(directory);
+                using (var buffer = new MemoryStream(bytes))
+                using (var archive = new ZipArchive(buffer, ZipArchiveMode.Read))
+                {
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(entry.Name))
+                        {
+                            continue; // directory entry
+                        }
+                        string target = Path.Combine(
+                            directory,
+                            entry.FullName.Replace('\\', '/')
+                                .Replace('/', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(target));
+                        entry.ExtractToFile(target, true);
+                    }
+                }
+
+                Directory.CreateDirectory(root);
+                string temporary = pointer + ".tmp";
+                File.WriteAllText(temporary, hash);
+                if (File.Exists(pointer))
+                {
+                    File.Delete(pointer);
+                }
+                File.Move(temporary, pointer);
             }
         }
 

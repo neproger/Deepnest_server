@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$CorelProject,
+    [string]$ServerZip,
     [switch]$SkipCacheCleanup
 )
 
@@ -234,6 +235,13 @@ try {
     Replace-BinaryEntry $archive `
         "content/VSTA_CS_Project/CorelDeepnest.Contracts.dll" $contractsOutput
 
+    if ($ServerZip) {
+        if (-not (Test-Path -LiteralPath $ServerZip)) {
+            throw "The bundled server zip was not found: $ServerZip"
+        }
+        Replace-BinaryEntry $archive "content/VSTA_CS_Project/server.zip" $ServerZip
+    }
+
     $projectEntry = $archive.GetEntry("content/VSTA_CS_Project/CorelDeepnest.csproj")
     if (-not $projectEntry) {
         throw "The Corel-created C# project was not found inside the addon."
@@ -261,6 +269,19 @@ try {
 		<EmbeddedResource Include="CorelDeepnest.Contracts.dll">
 			<LogicalName>CorelDeepnest.Contracts.dll</LogicalName>
 		</EmbeddedResource>
+"@
+        if ($ServerZip) {
+            $runtimeResource += @"
+		<EmbeddedResource Include="server.zip">
+			<LogicalName>server.zip</LogicalName>
+		</EmbeddedResource>
+"@
+        }
+        $runtimeResource += @"
+	</ItemGroup>
+	<ItemGroup>
+		<Reference Include="System.IO.Compression" />
+		<Reference Include="System.IO.Compression.FileSystem" />
 	</ItemGroup>
 "@
         $projectText = $projectText.Replace(
@@ -297,6 +318,14 @@ try {
             '<msb:File Include="CorelDeepnest.Runtime.dll"/>',
             '<msb:File Include="CorelDeepnest.Runtime.dll"/>' +
             "`r`n`t`t<msb:File Include=`"CorelDeepnest.Contracts.dll`"/>"
+        )
+    }
+
+    if ($ServerZip -and $manifestText -notmatch 'File Include="server\.zip"') {
+        $manifestText = $manifestText.Replace(
+            '<msb:File Include="CorelDeepnest.Contracts.dll"/>',
+            '<msb:File Include="CorelDeepnest.Contracts.dll"/>' +
+            "`r`n`t`t<msb:File Include=`"server.zip`"/>"
         )
     }
 
