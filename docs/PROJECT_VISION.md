@@ -1,5 +1,11 @@
 # Deepnest Server — Project Vision
 
+> **Обновление (2026-09):** вычислительное ядро — теперь **ironnest** (Rust,
+> нативный Node-API аддон, вендоренный в `native/vendor/ironnest`). Старый
+> Deepnest GA/NFP и SVGnest WASM удалены. Разделы ниже, описывающие «Deepnest
+> как ядро», — исторический контекст. Актуальное состояние движка:
+> [IRONNEST_ENGINE.md](IRONNEST_ENGINE.md).
+
 ## 1. Что мы строим
 
 Проект должен превратиться из форка desktop Deepnest в самостоятельный headless Node.js сервис для 2D nesting.
@@ -126,7 +132,12 @@ failed
 
 ---
 
-# 4. Deepnest остается вычислительным ядром
+# 4. Вычислительное ядро
+
+> **Исторический раздел.** Ядро теперь — [ironnest](IRONNEST_ENGINE.md)
+> (`native/vendor/ironnest` + `native/ironnest-napi`); старый алгоритм Deepnest
+> удалён. Принципы сохраняются: ядро отделено от инфраструктуры, изменения
+> алгоритма — только отдельно и с regression tests.
 
 На данном этапе не требуется переписывать алгоритм Deepnest.
 
@@ -611,6 +622,13 @@ Deepnest Server должен оставаться самостоятельным
 # Known Architectural Debt
 
 Ниже перечислены конкретные расхождения текущей реализации с целевым видением. Это не список задач на «сейчас», а известные границы, которые нельзя путать с уже достигнутым результатом.
+
+> **Обновление (2026-09):** пункты 1 (HTTP Job API), 2 (Job Manager) и 3
+> (module-level `eventEmitter`) реализованы/сняты. Пункт 9 (native addon ABI)
+> снят: C++ addon удалён, движок теперь Rust через Node-API (стабильный ABI).
+> Пункт 8 частично снят: Electron-зависимости удалены. Ниже список оставлен
+> как исторический контекст; актуальные ограничения движка — в
+> [IRONNEST_ENGINE.md](IRONNEST_ENGINE.md).
 
 1. **Нет HTTP Job API.** Существует только демонстрационный `server.mjs` (Express + HTML-страницы + SSE + `/text` + загрузка шрифтов через `api.fontsource.org`). Требуемых `POST /api/v1/jobs` и lifecycle job нет. `server.mjs` не является целевым API.
 

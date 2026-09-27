@@ -309,9 +309,6 @@ export async function adaptInput(spec) {
   sheet.quantity = spec.bin.mode === "auto"
     ? geometry.parts.reduce((sum, part) => sum + part.quantity, 0)
     : spec.bin.quantity;
-  // Renderer is SVG-specific and loaded only on this path.
-  const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
-  renderContext.render = nestingToSVG;
 
   return { geometry, renderContext, engineOptions: svgEngineOptions(spec) };
 }

@@ -2,6 +2,12 @@
 (newest on top, breaking changes)
 
 
+2026-09-27 replace the nesting engine with `ironnest` (Rust, native Node-API addon)
+           removed the original Deepnest GA/native-NFP engine, the SVGnest WASM
+           core, the C++ Minkowski addon and the server-side SVG renderer;
+           `GET /result.svg` now returns RESULT_FORMAT_UNAVAILABLE
+           build the engine with `npm run engine:build` (requires Rust, stable)
+           vendored engine in `native/vendor/ironnest` (MPL-2.0) + `native/ironnest-napi`
 2023-05-15 rename `npm run` scripts: fullbuild->build-all, fullclean->clean-all
            introduced dist-all that includes a full clean rebuild with dist
 2023-05-14 removed all `npm run` hardcoded filesystem references to `Dogthemachine`

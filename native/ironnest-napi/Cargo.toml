@@ -1,0 +1,22 @@
+[package]
+name = "ironnest-napi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ironnest = { path = "../vendor/ironnest/crates/ironnest" }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

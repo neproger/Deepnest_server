@@ -11,7 +11,6 @@ const repoRoot = path.resolve(
   "..",
   ".."
 );
-const { calculateNFP } = require(path.resolve(repoRoot, "build", "Release", "addon.node"));
 const ClipperLib = require(path.resolve(repoRoot, "main", "util", "clipper.js"));
 
 // Prove this test runs without DOM.
@@ -78,71 +77,6 @@ test("winding: signed area convention (CCW positive)", () => {
   assert.ok(signedArea(square(20, false)) < 0, "CW is negative");
 });
 
-test("winding: native calculateNFP is orientation-agnostic", () => {
-  const results = [];
-  for (const outerCcw of [true, false]) {
-    for (const holeCcw of [true, false]) {
-      const A = square(20, outerCcw);
-      A.children = [rect(
-        [
-          { x: 8, y: 8 },
-          { x: 12, y: 8 },
-          { x: 12, y: 12 },
-          { x: 8, y: 12 },
-        ],
-        holeCcw
-      )];
-      const B = square(3, true);
-      B.children = [];
-      const nfp = calculateNFP({ A, B });
-      results.push(
-        nfp.map((poly) => ({
-          length: poly.length,
-          area: Math.round(signedArea(poly) * 1000) / 1000,
-          children: (poly.children || []).length,
-        }))
-      );
-    }
-  }
-  for (const result of results) {
-    assert.deepEqual(result, results[0], "all winding combos must match");
-  }
-  assert.equal(results[0].length, 1, "one NFP polygon");
-  assert.equal(results[0][0].children, 1, "the hole is represented");
-});
-
-test("winding: hole changes the NFP (topology comes from children)", () => {
-  const solid = square(20, true);
-  solid.children = [];
-  const holed = square(20, true);
-  holed.children = [ring(
-    [
-      { x: 8, y: 8 },
-      { x: 12, y: 8 },
-      { x: 12, y: 12 },
-      { x: 8, y: 12 },
-    ],
-    true
-  )];
-  const B = square(3, true);
-  B.children = [];
-
-  const solidNfp = calculateNFP({ A: solid, B });
-  const holedNfp = calculateNFP({ A: holed, B });
-
-  const describe = (nfp) =>
-    nfp.map((p) => ({
-      length: p.length,
-      area: Math.round(signedArea(p) * 1000) / 1000,
-      children: (p.children || []).length,
-    }));
-  assert.notDeepEqual(
-    describe(holedNfp),
-    describe(solidNfp),
-    "holes must be incorporated into the NFP"
-  );
-});
-
 test("winding: JS Clipper MinkowskiSum is orientation-agnostic", () => {
   const run = (outerCcw) => {
     const A = square(20, outerCcw).map((p) => ({ X: p.x, Y: p.y }));
@@ -163,7 +97,7 @@ test("winding: JS Clipper MinkowskiSum is orientation-agnostic", () => {
   assert.deepEqual(describe(run(true)), describe(run(false)));
 });
 
-test("winding: full engine nests all outer/hole combinations", async () => {
+test("winding: engine nests all outer/hole combinations", async () => {
   for (const outerCcw of [true, false]) {
     for (const holeCcw of [true, false]) {
       const sheet = square(60, true);

@@ -1,49 +1,18 @@
-type FontBasicResponse = {
-  id: string;
-  family: string;
-  subsets: string[];
-  defSubset: string;
-  weights: number[];
-  styles: string[];
+type NestingConfig = {
+  units?: "mm" | "inch";
+  scale?: number;
+  spacing?: number;
+  curveTolerance?: number;
+  /** number of evenly spaced orientations (4 → 0/90/180/270) or an angle list */
+  rotations?: number | number[];
+  /** samples per item placement */
+  budget?: number;
+  strategy?: "sampling" | "nfp";
+  separationEffort?: "full" | "fast" | "max" | "off";
+  columnWeight?: number;
 };
 
-type FontResponse = FontBasicResponse & {
-  variants: Record<
-    string /** weights */,
-    Record<
-      string /** styles */,
-      Record<
-        string /** subsets */,
-        { url: { woff2: string; woff: string; ttf: string } }
-      >
-    >
-  >;
-};
-
-type DeepNestConfig = {
-  units: "mm" | "inch";
-  scale: number;
-  spacing: number;
-  curveTolerance: number;
-  clipperScale: number;
-  rotations: number;
-  threads: number;
-  populationSize: number;
-  mutationRate: number;
-  placementType: "gravity" | "box" | "convexhull";
-  mergeLines: boolean;
-  /**
-   * ratio of material reduction to laser time. 0 = optimize material only, 1 = optimize laser time only
-   */
-  timeRatio: number;
-  simplify: boolean;
-  dxfImportScale: number;
-  dxfExportScale: number;
-  endpointTolerance: number;
-  conversionServer: string;
-};
-
-type NestingOptions = Partial<DeepNestConfig> & {
+type NestingOptions = NestingConfig & {
   bin: { width: number; height: number } | string;
   timeout?: number;
   progressCallback?: (data: {
@@ -97,7 +66,8 @@ export function nest(
       placed: number;
       total: number;
     };
-    svg: () => string;
+    /** Optional: no engine currently renders results server-side. */
+    svg?: () => string;
     abort: () => Promise<void>;
   }) => any,
   options: NestingOptions

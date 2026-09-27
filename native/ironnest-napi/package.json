@@ -1,0 +1,15 @@
+{
+  "name": "ironnest-napi",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "napi build --platform --release"
+  },
+  "napi": {
+    "name": "ironnest_napi"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4"
+  }
+}

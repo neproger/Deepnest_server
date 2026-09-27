@@ -26,7 +26,11 @@ async function main(files, { bin, output, timeout = 60_000, config = {} }) {
       const dir = path.resolve(output, `nesting-${i}`);
       i++;
       await ensureDir(dir);
-      await writeFile(path.resolve(dir, "result.svg"), svg());
+      // Only some engines produce a server-side SVG render; the structured
+      // result is always written.
+      if (typeof svg === "function") {
+        await writeFile(path.resolve(dir, "result.svg"), svg());
+      }
       await writeFile(
         path.resolve(dir, "data.json"),
         JSON.stringify(result, null, 2)

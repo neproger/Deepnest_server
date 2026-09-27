@@ -6,10 +6,12 @@ A fast nesting tool for laser cutters and other CNC tools
 
 Deepnest is a node application originally based on [SVGNest](https://github.com/Jack000/SVGnest)
 
-- New nesting engine with speed critical code written in C
-- Merges common lines for laser cuts
+- Deterministic nesting engine: the Rust [ironnest](https://github.com/TexasCoding/ironnest)
+  core (a `f64` jagua-rs fork with a bin-packing optimizer) embedded as a native
+  Node-API addon (`native/ironnest-napi`); see [docs/IRONNEST_ENGINE.md](docs/IRONNEST_ENGINE.md)
+- Fixed-size sheets and multi-sheet packing with stable client ids
+- SVG input as an adapter; the engine itself is DOM-free
 - Support for DXF files (via conversion)
-- New path approximation feature for highly complex parts
 
 ## Project Vision
 
@@ -17,34 +19,32 @@ See [docs/PROJECT_VISION.md](docs/PROJECT_VISION.md) for the target architecture
 
 See [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) for the chronological development journal and the current known-good baseline. Run `npm test` (core + native addon + HTTP server) or `npm run server` for a manual HTTP server.
 
-See [docs/GEOMETRY_PIPELINE.md](docs/GEOMETRY_PIPELINE.md) for the current SVG → polygon → worker geometry model and the candidate canonical-geometry boundary.
+See [docs/GEOMETRY_PIPELINE.md](docs/GEOMETRY_PIPELINE.md) for the SVG → polygon → canonical geometry model.
+
+See [docs/IRONNEST_ENGINE.md](docs/IRONNEST_ENGINE.md) for the nesting engine: the vendored
+Rust core, the native Node-API addon, and how to build/rebuild it.
 
 ## Fork History
 
 This repo was forked from [deepnest-io](https://github.com/deepnest-io/Deepnest) in order to make Deepnest work on node, decoupled from the electron app, refer to the [example](server.mjs).
 
+The original Deepnest GA / native-NFP engine and the SVGnest WASM core have been
+**removed**; [ironnest](https://github.com/TexasCoding/ironnest) is now the only
+nesting engine (see `docs/IRONNEST_ENGINE.md`).
+
 ## Prerequisites
 
 - **Node 20+:** [Node.js](https://nodejs.org). You can use the Node Version Manager (nvm):
   - [nvm-windows](https://github.com/coreybutler/nvm-windows/releases) to download Node and change versions.
-- **Python 3.7.9+** You can use the Python Version Manager (pyenv):
-  - [pyenv-win](https://github.com/pyenv-win/pyenv-win) to download and change versions.
-- **Visual Studio with Desktop Development with C++ extension**
-  - Install VS2022 from https://visualstudio.microsoft.com/vs/features/cplusplus/
-  - or, as an administrator via `npm install --global windows-build-tools` (older VS version)
-
-### Possible Problems
-
-- On Windows 10 1905 or newer, you might need to **disable the built-in Python launcher** via
-  - **Start** > "**Manage App Execution Aliases**" and turning off the "**App Installer" aliases for Python**"
-- close-and-open all command shells and your IDE to activate the latest setup
+- **Rust (stable):** required to build the nesting engine addon (`npm run engine:build`). Install via [rustup](https://rustup.rs).
 
 ## Getting Started
 
 ```sh
 git clone https://github.com/deepnest-io/Deepnest
 cd Deepnest
-npm install # also builds the native Minkowski addon for Node
+npm install
+npm run engine:build   # builds the ironnest native addon (requires Rust)
 ```
 
 ### Run
@@ -246,7 +246,7 @@ units, scale, endpointTolerance, ...). The adapter reserves `bin`,
 ### Test
 
 ```sh
-npm test          # core + native addon + Job API end-to-end
+npm test          # core + engine + Job API end-to-end
 npm run test:core
 npm run test:server
 ```

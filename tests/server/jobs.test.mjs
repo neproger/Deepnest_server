@@ -1,4 +1,4 @@
-import { after, before, test } from "node:test";
+import { after, afterEach, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -29,6 +29,13 @@ after(async () => {
   await jobs.stopAll().catch(() => {});
   server.closeAllConnections?.();
   await new Promise((resolve) => server.close(resolve));
+});
+
+afterEach(async () => {
+  // The manager runs one job at a time. A job left `running` by an assertion
+  // failure would otherwise block the queue for every later test, so release
+  // the slot after each test.
+  await jobs.stopAll().catch(() => {});
 });
 
 function jobBody(parts, extra = {}) {
@@ -128,7 +135,7 @@ async function waitFor(fn, { timeout = 20_000, interval = 40, message } = {}) {
 const statusOf = async (id) =>
   (await getJson(`/api/v1/jobs/${id}`)).json?.status;
 
-test("creates a job, exposes lifecycle/result with stable ids and svg", async () => {
+test("creates a job, exposes lifecycle/result with stable ids", async () => {
   const created = await createJob(
     jobBody([
       { id: "part-A", data: partSvg },
@@ -170,10 +177,11 @@ test("creates a job, exposes lifecycle/result with stable ids and svg", async ()
     { message: "placementComplete never became true" }
   );
 
-  const svg = await fetch(`${base}/api/v1/jobs/${id}/result.svg`);
-  assert.equal(svg.status, 200);
-  assert.match(svg.headers.get("content-type") || "", /svg/);
-  assert.ok((await svg.text()).includes("<svg"));
+  // No server-side SVG renderer: the structured result is the contract, and
+  // any input format reports the SVG result as unavailable.
+  const svg = await getJson(`/api/v1/jobs/${id}/result.svg`);
+  assert.equal(svg.status, 400);
+  assert.equal(svg.json.error.code, "RESULT_FORMAT_UNAVAILABLE");
 
   const stopRes = await stopJob(id);
   assert.equal(stopRes.status, 200);

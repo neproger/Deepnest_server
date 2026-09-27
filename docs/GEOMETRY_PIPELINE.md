@@ -1,42 +1,38 @@
 # Geometry Pipeline
 
-> Investigation of the **current** geometry model, from an SVG string to the
-> objects consumed by the nesting algorithm. This documents what actually
-> exists today. It is not a target architecture and does not propose changing
-> the pipeline. Findings come from reading `main/svgparser.js`,
-> `main/deepnest.js`, `main/background.js`, `main/processPair.mjs` and from a
-> runtime probe (see "Runtime evidence" below).
+> How geometry moves from an SVG string (or a JSON geometry DTO) to the nesting
+> engine. SVG/DOM is an input adapter; the engine itself is DOM-free.
+>
+> **2026-09:** the nesting engine is now [`ironnest`](IRONNEST_ENGINE.md) (Rust,
+> native Node-API addon). The Deepnest GA / native-NFP worker and the SVGnest
+> WASM core have been **removed**. The worker/NFP sections later in this
+> document are kept as historical notes about the old engine and no longer
+> describe the running system.
 
 ## Current Flow
 
 ```text
-SVG string
-  │
-  ├─ index.node.mjs            installs jsdom globals (DOMParser, XMLSerializer, window, document)
-  │
-  ├─ index.mjs nest()          importsvg(bin) → sheet part, then importsvg(parts...)
-  │      │
-  │      └─ main/svgparser.js  load → clean (transform/flatten/filter/splitPath/mergeLines)
-  │             │
-  │             └─ main/deepnest.js getParts()
-  │                    polygonify()   curves → point arrays
-  │                    cleanPolygon() clipper simplify
-  │                    toTree()       containment → parent/children (holes)
-  │                    svgelements[]  attach source DOM nodes
-  │
-  ├─ deepNest.parts[]          { polygontree, svgelements, bounds, area, quantity, filename, sheet? }
-  │
-  └─ deepNest.start()
-         cloneTree()            plain copy: points {x,y,exact} + children
-         offsetTree()           apply spacing via clipper offset + simplify
-         launchWorkers()        GA seed `adam`, attach id/source/filename
-                │
-                └─ worker.postMessage(payload)   ← plain data, no DOM
-                       │
-                       └─ main/background.js processMessage() → placeParts()
-                              → main/processPairs.node.mjs → processPair.mjs (clipper Minkowski)
-                              → native addon calculateNFP (holes / inside)
+SVG string                              JSON geometry DTO
+  │                                          │
+  ├─ index.node.mjs  installs jsdom globals (DOMParser, XMLSerializer, window, document)
+  │   (SVG input only)                       │
+  ├─ src/geometry/svg-adapter.mjs            └─ src/geometry/json-adapter.mjs
+  │     main/svgparser.js + main/deepnest.js getParts()
+  │     polygonify / cleanPolygon / toTree → polygon trees
+  │                                          │
+  └──────────────► Canonical Geometry ◄──────┘
+        { units?, sheets: [{ id, quantity?, polygontree }],
+          parts:  [{ id, quantity?, polygontree }] }
+                         │
+               src/geometry/engine.mjs  (nestGeometry / nestWithRender)
+                         │
+               src/geometry/engine-ironnest/   (worker_threads)
+                         │
+               native/ironnest-napi            (Rust, Node-API)
+                         │
+        placements { item, x, y, rotation } + unplaced
 ```
+
 
 ## SVG Parsing
 
@@ -243,32 +239,30 @@ today it is coupled to the originally imported DOM nodes.
 
 ## Implemented Canonical Boundary (2026-09-25)
 
-The candidate below is now the implemented internal boundary. The nesting
-algorithm was not changed; the existing plain polygon tree became explicit.
+The canonical boundary described here is the implemented internal boundary.
 
 ```text
-SVG string ──> src/geometry/svg-adapter.mjs ──> Canonical Geometry
-                                                   │
-                              src/geometry/engine.mjs nestGeometry()
-                                                   │
-                                         existing Deepnest engine
+SVG string / JSON DTO ──> Canonical Geometry ──> src/geometry/engine.mjs
+                                                         │
+                                              src/geometry/engine-ironnest/
+                                                         │
+                                              native/ironnest-napi (Rust)
 ```
 
 - `src/geometry/canonical.mjs` — documents/validates/normalises canonical
   geometry and deep-clones polygon trees. No SVG/DOM/HTTP.
-- `src/geometry/engine.mjs` — `nestGeometry(geometry, callback, options)`:
-  DOM-independent engine entry, same progress/result/abort semantics. Also
-  exports `nestWithRender(...)` used only by the SVG path. It does **not**
-  import the SVG parser or the SVG renderer.
+- `src/geometry/engine.mjs` — `nestGeometry(geometry, callback, options)` and
+  `nestWithRender(geometry, renderContext, callback, options)`: both delegate to
+  the ironnest adapter. `renderContext` is accepted for interface parity only
+  (the ironnest engine does not consume it).
 - `src/geometry/svg-adapter.mjs` — `parseSvgInput(svgInput, options)` returns
   `{ geometry, renderContext }`. Uses `main/svgparser.js` and jsdom unchanged.
-  `renderContext` (DOM elements, bounds) is adapter-owned and never enters
-  canonical geometry.
-- `index.mjs nest()` — thin composer: `parseSvgInput` → `nestGeometry` (with
-  `nestingToSVG` injected as render function). Public callback/HTTP behaviour is
-  unchanged.
-- `main/deepnest.js` now `require`s `svgparser` lazily, so the engine is
-  importable and runnable without DOM globals.
+  `renderContext` (DOM elements, bounds, `previewParts`) is adapter-owned and
+  never enters canonical geometry.
+- `index.mjs nest()` — thin composer: `parseSvgInput` → `nestWithRender`.
+- `main/deepnest.js` is retained **only** as the SVG importer
+  (`importsvg`/`getParts`); its GA/worker `start()` path is dead and the
+  `background.js` worker has been removed.
 
 Implemented canonical shape:
 
@@ -283,19 +277,21 @@ Implemented canonical shape:
 `exact`, `source`, `id`, `rotation` are engine-derived and **not** part of the
 input. `svgelements`/`bounds` stay in the adapter's `renderContext`.
 
-Limitations (unchanged, documented deliberately): current nesting semantics are
-guaranteed for outer polygons with **direct** hole children; deeper topology and
-multiple sheets are representable structurally but not guaranteed by the engine.
+Limitations (documented deliberately): the engine guarantees an outer polygon
+with **direct** hole children for **sheet** holes (keep-out zones). Holes
+**inside a part** are not modelled by ironnest (one outer ring per part); deeper
+topology and multiple sheet types are representable and handled by the adapter's
+sheet expansion.
 
-### Current implementation vs new boundary
+### Removed engine (historical)
 
-- **Current implementation** (still in place): `main/svgparser.js` (DOM),
-  `DeepNest.getParts`/`importsvg`, polygon trees on `deepNest.parts`, worker
-  payload `individual.placement`, NFP/clipper/native/GA in `main/background.js`.
-- **New boundary**: the explicit canonical object exchanged between the SVG
-  adapter and `nestGeometry`; `nestGeometry` runs the same engine unchanged.
-- `main/nestingToSVG.mjs` remains DOM-coupled and is injected only on the SVG
-  path; canonical nesting works without it.
+- `main/background.js`, `main/processPair.mjs`, `main/processPairs.node.mjs` and
+  the native `src/{addon,minkowski}.cc` + `src/polygon` addon have been removed.
+- `main/nestingToSVG.mjs` (server-side SVG rendering) has been removed;
+  `GET /result.svg` returns `RESULT_FORMAT_UNAVAILABLE`.
+- The NFP / worker / GA sections later in this document describe the removed
+  Deepnest engine and are kept as historical reference only.
+- See [IRONNEST_ENGINE.md](IRONNEST_ENGINE.md) for the current engine.
 
 ### Public JSON Geometry DTO vs Internal Canonical Geometry
 

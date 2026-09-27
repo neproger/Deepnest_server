@@ -201,6 +201,7 @@ export class Job {
       code: error?.code || "ENGINE_ERROR",
       message: error?.message || String(error),
     };
+    console.error(`[job ${this.id}] failed: ${this.error.code} ${this.error.message}`);
     const abort = this.abort;
     this.abort = null;
     if (abort) {

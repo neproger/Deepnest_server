@@ -4,7 +4,6 @@
   "description": "Deep nesting for Laser and CNC",
   "main": "index.node.mjs",
   "license": "MIT",
-  "gypfile": true,
   "bin": "cli.mjs",
   "scripts": {
     "start": "node server.mjs",
@@ -12,8 +11,8 @@
     "test": "node --test tests/",
     "test:core": "node --test tests/core/",
     "test:server": "node --test tests/server/",
-    "configure": "node-gyp configure --release",
-    "clean": "rmdir /s /q build dist >nul 2>&1|echo . >nul"
+    "clean": "rmdir /s /q build dist >nul 2>&1|echo . >nul",
+    "engine:build": "npm --prefix native/ironnest-napi install && npm --prefix native/ironnest-napi run build"
   },
   "repository": "https://github.com/deepnest-io/Deepnest",
   "keywords": [
@@ -28,11 +27,9 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^22.10.1",
-    "nan": "^2.22.0"
+    "@types/node": "^22.10.1"
   },
   "dependencies": {
-    "bindings": "^1.5.0",
     "commander": "^12.1.0",
     "express": "^4.21.2",
     "fs-extra": "^11.2.0",

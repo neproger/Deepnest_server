@@ -1535,3 +1535,59 @@ Corel selection
 
 `1457135 refactor: make SVG the sole Corel geometry path` plus follow-ups
 `bfa3287`, `b722460`, `0e5292a`, `49b8b01`.
+
+---
+
+## 2026-09-27 — ironnest как единственный движок
+
+### Goal
+
+Заменить вычислительное ядро на `ironnest` (Rust) и **удалить** все прежние
+движки: оригинальный Deepnest GA/NFP и SVGnest WASM. Сохранить HTTP Job API,
+Corel DTO, stable ids и auto-sheets.
+
+### Что сделано
+
+- **Вендоринг.** `ironnest` (`publish = false`) скопирован в
+  `native/vendor/ironnest` (crates `geo`, `cde`, `optimizer`, `ironnest`),
+  commit `cbc641f`. MPL-2.0; поверх — один локальный патч (ниже).
+- **Node-API мост.** `native/ironnest-napi` (napi-rs, `.node`): JSON-in/out
+  функции `nest`/`nestMulti` над `nest_with_config`/`nest_multi_with_config`.
+  Сборка — `npm run engine:build` (Rust stable). Артефакты не коммитятся.
+- **Адаптер.** `src/geometry/engine-ironnest/{index,worker}.mjs`: canonical
+  geometry → ironnest; поддержка нескольких типов листов (expansion + маппинг
+  в `sheetId`); часть-отверстия не моделируются (один внешний контур).
+- **Job-семантика.** Движок отдаёт готовый расчёт за вызов, поэтому воркер
+  крутит restart-loop и форвардит только улучшения; `abort` → terminate.
+- **Прогрессивный preview.** Замеры на реальной Corel-задаче (26 деталей,
+  1000×500, spacing 20): `full` ≈ 47с, `fast` ≈ 7с. Добавлен патч движка
+  `SeparationEffort::Off` (пропуск separation tail) в
+  `crates/optimizer/src/{lib.rs,sep/mod.rs}`. Адаптер делает iteration 0 в
+  режиме `off` (layout за ≈1.5с), далее `fast` (плотнее).
+- **Удаление.** `src/geometry/engine-wasm/`, `main/background.js`,
+  `main/processPair.mjs`, `main/processPairs.node.mjs`,
+  `main/nestingToSVG.mjs`, C++ addon (`binding.gyp`, `src/addon.cc`,
+  `src/minkowski.cc`, `src/polygon`), тесты `wasm-engine`/`native-addon`,
+  `third_party/svgnest`. `src/geometry/engine.mjs` упрощён до ironnest-only.
+- **Настройки.** `config.separationEffort` по умолчанию `"fast"`;
+  пробрасываются `budget`, `strategy`, `columnWeight`, `rotations`, `spacing`.
+- **Доки.** Новый `docs/IRONNEST_ENGINE.md`; удалён `docs/WASM_ENGINE.md`;
+  обновлены `README.md`, `GEOMETRY_PIPELINE.md`, `PROJECT_VISION.md`.
+
+### Проверки
+
+- `node --test tests/core/` — 24/24 (после удаления движков).
+- End-to-end `/api/v1`: SVG-задача размещается, `placementComplete: true`,
+  external DTO корректен, `stop` работает; preview ≈1.5с, финальный ≈9с.
+- Server-тесты: 17 падений — **предсуществующие** (написаны под старое
+  Deepnest-поведение; идентичны на удалённом wasm). Подлежат обновлению.
+
+### Known limitations
+
+- Part holes не моделируются движком (только внешний контур).
+- `GET /result.svg` → `RESULT_FORMAT_UNAVAILABLE` (рендерер удалён; Corel его
+  не использует).
+- Движок однопоточный (детерминизм by design); параллельность — за Job-очередью.
+- Переполненные задачи: первый результат ≈1.5с (preview), уточнение `fast`
+  зависит от геометрии (секунды).
+

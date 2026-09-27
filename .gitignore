@@ -3,11 +3,8 @@
 /workspace.xml
 .DS_Store
 /node_modules
-/build
 /dist
 /bin
-/minkowski
-/deepnest-*win32-x64
 /output
 # package-lock.json
 git_token.rtf
@@ -20,4 +17,11 @@ node_modules/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
-/third_party/
+
+# Native engine (napi-rs addon): vendored source is tracked, build artifacts are not.
+/native/ironnest-napi/target/
+/native/ironnest-napi/node_modules/
+/native/ironnest-napi/*.node
+/native/ironnest-napi/index.js
+/native/ironnest-napi/index.d.ts
+/native/vendor/ironnest/target/

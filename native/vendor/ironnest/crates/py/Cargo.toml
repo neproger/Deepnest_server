@@ -1,0 +1,26 @@
+[package]
+name         = "ironnest-py"
+description   = "PyO3 binding — builds the `ironnest` abi3-py313 wheel"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+publish      = false
+
+# The Python import name is `ironnest`; the artifact is a C-ABI dynamic library.
+[lib]
+name       = "ironnest"
+crate-type = ["cdylib"]
+
+# NB: no `[lints] workspace = true` here — the determinism gate is for the engine crates, and
+# pyo3 macro expansion would otherwise risk false positives in the binding layer.
+
+[dependencies]
+# The public façade crate (package `ironnest`) — renamed locally to `ironnest_core` so its lib name
+# does not clash with THIS crate's `[lib] name = "ironnest"` (the Python import name / abi3 init
+# symbol `PyInit_ironnest`).
+# `parallel` is ON for the wheel: `restarts > 1` runs the multi-start constructions on threads (the
+# GIL is already released around the solve). Byte-identical to sequential — proven by the golden run
+# under `--features parallel` — so the wheel's determinism contract is unchanged.
+ironnest_core = { package = "ironnest", path = "../ironnest", features = ["parallel"] }
+pyo3 = { workspace = true }
