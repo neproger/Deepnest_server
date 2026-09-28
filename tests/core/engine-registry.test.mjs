@@ -51,6 +51,7 @@ function fakeEngine(onCall) {
 
 test("registers the built-in deepnest engine by default", () => {
   assert.ok(listEngines().includes("deepnest"));
+  assert.ok(listEngines().includes("opennest"));
 });
 
 test("delegates to an engine selected with options.engine", async () => {

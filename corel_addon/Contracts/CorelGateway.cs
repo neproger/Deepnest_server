@@ -295,18 +295,25 @@ namespace CorelDeepnest.Contracts
                     double x = RequiredDouble(placement, "x");
                     double y = RequiredDouble(placement, "y");
                     double rotation = RequiredDouble(placement, "rotation");
+                    // Rotate the whole placement 180 degrees about the sheet
+                    // centre: (x, y) -> (W - x, H - y), angle + 180. This keeps
+                    // the applied result consistent with the addon preview and
+                    // with the CNC setup.
+                    double rotatedX = sheetWidth - x;
+                    double rotatedY = sheetHeight - y;
+                    double rotatedRotation = rotation + 180.0;
                     double instanceLeft = sheetLeft + sheetInstanceId *
                         (sheetWidthDocument + sheetGapDocument);
                     double targetX = instanceLeft + application.ConvertUnits(
-                        x, MillimeterUnit, documentUnit);
+                        rotatedX, MillimeterUnit, documentUnit);
                     double targetY = sheetBottom + sheetHeightDocument -
-                        application.ConvertUnits(y, MillimeterUnit, documentUnit);
+                        application.ConvertUnits(rotatedY, MillimeterUnit, documentUnit);
 
                     dynamic copy = ((dynamic)captured.SourceShape).Duplicate(0.0, 0.0);
                     copy.MoveToLayer(layer);
                     // SVG coordinates point down while Corel document
                     // coordinates point up, so the rotation changes sign.
-                    copy.RotateEx(-rotation, captured.OriginX, captured.OriginY);
+                    copy.RotateEx(-rotatedRotation, captured.OriginX, captured.OriginY);
                     copy.Move(
                         targetX - captured.OriginX,
                         targetY - captured.OriginY);

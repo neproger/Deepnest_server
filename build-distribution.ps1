@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Build the end-user CorelDRAW distribution folder.
 
@@ -37,6 +37,12 @@ Copy-Item -LiteralPath (Join-Path $root "src\geometry") (Join-Path $serverDir "s
 Copy-Item -LiteralPath (Join-Path $root "src\jobs") (Join-Path $serverDir "src\jobs") -Recurse
 New-Item -ItemType Directory -Path (Join-Path $serverDir "build\Release") -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $root "build\Release\addon.node") (Join-Path $serverDir "build\Release")
+# Optional second engine (OpenNest). Ship it when it has been built; the server
+# runs fine without it (Deepnest stays the default).
+$opennestAddon = Join-Path $root "build\Release\opennest.node"
+if (Test-Path -LiteralPath $opennestAddon) {
+    Copy-Item -LiteralPath $opennestAddon (Join-Path $serverDir "build\Release")
+}
 
 Write-Host "2/6 Bundle the Node runtime and production dependencies"
 $nodeExe = (Get-Command node).Source
@@ -103,8 +109,9 @@ Deepnest для CorelDRAW — установка
    - «TestDeepnestConnection» — проверка связи с сервером;
    - «NestSelectedShapes» — разложить выделенные объекты.
 
-При первом запуске аддон сам распакует и запустит сервер
-(http://127.0.0.1:8080). Ничего указывать не нужно.
+Сервер запускается сам при открытии окна раскладки и останавливается при его
+закрытии; отдельно указывать или запускать ничего не нужно
+(http://127.0.0.1:8080).
 
 Требования: CorelDRAW 2025 с компонентом VSTA (Visual Studio Tools for
 Applications). .NET Framework 4.8 уже есть в Windows.

@@ -1729,6 +1729,142 @@ Corel-дистрибутив. `DEEPNEST_ENGINE` без установленно�
 незарегистрированным именем теперь даёт явную `UNKNOWN_ENGINE` (раньше
 `ironnest` был встроен).
 
+---
 
+## 2026-09-28 — Второй движок: OpenNest (nfp_nest)
 
+### Goal
 
+Подключить OpenNest как полноценный второй движок через уже существующую
+механику сменного движка. Deepnest остаётся дефолтным; OpenNest выбирается
+`DEEPNEST_ENGINE=opennest`.
+
+### Почему OpenNest
+
+OpenNest (`petrasvestartas/OpenNest`, MIT) содержит C++ движок `nfp_nest` —
+реализацию метода SVGnest/Deepnest (NFP + GA) с расширениями. Что важно для нас:
+
+- чистый **C ABI** (`src/capi/nfp_nest_capi.h`) — удобен для нативной обёртки;
+- самообеспечен: Clipper2 и минимальный Boost.Polygon **вендорены** в репозиторий,
+  внешних зависимостей нет, C++17;
+- умеет непрямоугольные листы, отверстия/voids в деталях и листах, вложение в
+  отверстия — то, чего не хватало ironnest;
+- отдаёт **прогресс + live best layout** (`nfp_progress`/`nfp_fitness`/
+  `nfp_poll_layout`) и **кооперативный cancel** (`nfp_cancel`) — ровно наш
+  контракт progress/abort/best-result.
+
+Глобальное состояние solve (cancel/progress/snapshot) → один solve за раз; у нас
+и так `maxConcurrent = 1`.
+
+### Что сделано
+
+- **Вендоринг.** `src/opennest_cpp/{src,third_party/boost_min}` + `CMakeLists.txt`,
+  `LICENSE`, `CREDITS.md` скопированы в `native/opennest` на commit
+  `be5456b` (см. `native/opennest/UPSTREAM.md`). `bench/out/tools` не вендорены.
+- **Node-API аддон.** `src/opennest_addon.cc` + цель `opennest` в `binding.gyp`:
+  компилит Clipper2 + nest_lib + C-API + обёртку в `build/Release/opennest.node`.
+  Экспорт: async `nest(request)` (Promise, libuv thread), `cancel()`,
+  `progress()`, `fitness()`, `pollLayout(n)`. Вход/выход — TypedArray, ABI
+  повторяет C-API 1:1. Конкурентный `nest()` отклоняется (`g_busy`).
+- **Адаптер.** `src/geometry/engines/opennest.mjs`: canonical geometry → flat
+  TypedArray + params; во время solve поллит progress/fitness/pollLayout и
+  форвардит улучшения в callback; маппит `(tx,ty,angle,sheetId,partIndex)` в
+  engine payload. `abort()` → `addon.cancel()`.
+- **Реестр.** `engine.mjs` регистрирует `"opennest"` (lazy loader). Выбор —
+  `DEEPNEST_ENGINE=opennest`.
+- **Сборка/дистрибутив.** `npm install` собирает оба аддона (gypfile, два таргета);
+  добавлен `npm run build:native`. `build-distribution.ps1` кладёт
+  `opennest.node` в `server.zip`, если он собран.
+- **Тесты.** `tests/core/opennest-engine.test.mjs` (skip без собранного аддона):
+  простая раскладка, unplaced, лист с отверстием. `engine-registry.test.mjs`
+  проверяет наличие `opennest` в реестре.
+- **Лицензии/доки.** `LICENSES.md` (OpenNest MIT, Clipper2 Boost, Boost.Polygon
+  Boost), `README.md`, `CHANGELOG.md`, `native/opennest/UPSTREAM.md`.
+
+### Границы
+
+- `GET /result.svg` для OpenNest недоступен (server-side рендерера нет) —
+  `RESULT_FORMAT_UNAVAILABLE`; structured `GET /result` работает.
+- Сборка требует Python + C++ toolchain (node-gyp); здесь аддон не собирался,
+  тесты OpenNest skip-аются. На машине сборки — `npm install` / `npm run build:native`.
+- Deepnest остаётся дефолтным; OpenNest — opt-in.
+
+---
+
+## 2026-09-28 — OpenNest по умолчанию, SVG-рендер, установка Python
+
+### Что сделано
+
+- **Дефолт переключён на OpenNest.** `src/geometry/engine.mjs`:
+  `DEFAULT_ENGINE = "opennest"`; Deepnest остаётся через `DEEPNEST_ENGINE=deepnest`.
+- **SVG-результат для OpenNest.** Раньше `GET /result.svg` для OpenNest отдавал
+  `RESULT_FORMAT_UNAVAILABLE`. Теперь адаптер (`src/geometry/engines/opennest.mjs`)
+  для SVG-входа восстанавливает промежуточный объект, который ждёт общий
+  рендерер `main/nestingToSVG.mjs` (parts = [листы…, детали…], `source` со
+  сдвигом на число листов), и переиспользует `renderContext.render`. Для geometry
+  -входа renderer отсутствует → `RESULT_FORMAT_UNAVAILABLE` как и раньше.
+- **Гарантированный progress.** Адаптер шлёт хотя бы одно `engine.progress`
+  событие сразу, поэтому быстрые solve больше не «проскакивают» без прогресса.
+- **Python установлен** (per-user, без прав админа): Python 3.12.9 в
+  `%LOCALAPPDATA%\Programs\Python\Python312`, добавлен в user PATH и в переменную
+  `PYTHON`. `npm install` собрал оба аддона (`addon.node`, `opennest.node`).
+- `binding.gyp`: убран дублирующий `/std:c++17` (warning D9025).
+- **Дистрибутив пересобран:** `dist\DeepnestCorel\CorelDeepnest.CGSaddon`
+  (37.5 MB) — сервер с обоими аддонами и OpenNest по умолчанию.
+
+### Проверки
+
+- `npm install` / `npm run build:native` — оба аддона собираются.
+- `node --test` — **55/55 pass** (OpenNest теперь дефолтный: `result.svg`,
+  SSE `engine.progress`, стабильные id, чётки и voids — всё зелёное).
+- E2E HTTP с `DEEPNEST_ENGINE=opennest`: раскладка, стабильные `partId`/`sheetId`,
+  `placementComplete: true`.
+- `build-distribution.ps1` — успешно.
+
+### Замечание
+
+Пользователь прогоняет Corel вручную. Corel-аддон не использует `result.svg`
+(рисует preview из `result.parts`), но SVG-результат теперь доступен и по HTTP.
+
+---
+
+## 2026-09-28 — Corel: настройки OpenNest, поворот предпросмотра, фикс прямоугольников, жизненный цикл сервера
+
+### Что сделано
+
+- **Настройки OpenNest в Corel UI.** В `corel_addon/VstaMacro.cs` вместо
+  Deepnest-полей форма отдаёт нативные параметры `nfp_nest`: `placementType`
+  (Box/Gravity/Squeeze), `populationSize`, `mutationRate`, `seed`, `generations`,
+  `tryAllRotations`, `exactNfp`, `exactVoids`, `curveTolerance`,
+  `timeLimitSeconds`. Убраны `mergeLines`, `timeRatio`, `convexhull` (специфичны
+  для старого Deepnest). Добавлен helper `SetBool`.
+- **Предпросмотр.** Убран ошибочный вертикальный флип по Y (`screenY = originY +
+  worldY*scale`), добавлен поворот макета на 180° относительно центра листа.
+- **Apply.** `corel_addon/Contracts/CorelGateway.cs`: `ApplyPlacements` тоже
+  разворачивает раскладку на 180° (`(x,y) -> (W-x, H-y)`, угол `+180`).
+- **Фикс «детали не раскладываются».** Первопричина — хак OnShape в
+  `main/svgparser.js` (`applyTransform`, кейс `rect`): полигон с точкой `(0,0)`
+  очищался, поэтому Corel-экспорт `<rect>` в начале координат молча становился
+  пустой деталью. Хак удалён; добавлен регресс-тест в `tests/core/geometry.test.mjs`.
+- **Жизненный цикл сервера.** Аддон запускает встроенный сервер при показе формы
+  и завершает его при закрытии (`StopServer()` в обработчике `FormClosed`).
+  Плюс защита от устаревшего сервера: если `/health` отвечает процесс из другой
+  (старой) папки, он останавливается и стартует актуальный провиженный
+  (`RunningServerDirectory()` vs `ProvisionedServerDirectory()`).
+- **Дистрибутив пересобран:** `dist\DeepnestCorel` (37.6 MB).
+
+### Проверки
+
+- `node --test` — **55/55 pass**.
+- Реальный Corel-экспорт `part-18.svg` (1200×90 `<rect>`) парсится как 1200×90 мм
+  и раскладывается на 1220×2430 при spacing 20 (оба движка).
+- HTTP-проверка нового провиженного сервера: прямоугольная деталь размещена
+  (`x=0, y=0`).
+- `build-distribution.ps1` — успешно.
+
+### Причина «2 минуты ни одной детали»
+
+Старый node-процесс из предыдущей папки
+`%LOCALAPPDATA%\CorelDeepnest\Server\35d04416…` остался висеть на порту 8080;
+аддон по `/health` переиспользовал его, поэтому работал парсер без фикса. Теперь
+сервер глушится при закрытии формы, а устаревший перезапускается.

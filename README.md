@@ -21,9 +21,16 @@ See [docs/GEOMETRY_PIPELINE.md](docs/GEOMETRY_PIPELINE.md) for the current SVG â
 
 ### Nesting engine
 
-The nesting engine is the original **Deepnest** engine (JavaScript + the native
-Minkowski NFP addon in `src/`, built by `npm install`). It is the default and
-streams incremental improvements while it runs.
+The **default** engine is **OpenNest** (`nfp_nest`, a C++ NFP + genetic
+algorithm nester, MIT), vendored under `native/opennest` and wrapped as the
+`opennest` N-API addon (`npm install` builds it next to the Deepnest addon). It
+supports non-rectangular sheets and holes/voids and streams progress plus a live
+best layout. See `native/opennest/UPSTREAM.md` for provenance and `LICENSES.md`
+for its licenses.
+
+The original **Deepnest** engine (JavaScript + the native Minkowski NFP addon in
+`src/`) is still available and streams incremental improvements while it runs;
+select it with `DEEPNEST_ENGINE=deepnest`.
 
 The engine is pluggable: the geometry/Job layers talk to an engine registry
 (`src/geometry/engine-registry.mjs`), not to a specific implementation. A custom
@@ -31,7 +38,7 @@ engine can be installed with `DEEPNEST_ENGINE=<name>` plus
 `DEEPNEST_ENGINE_MODULE=<path-to-module>`, or programmatically with
 `registerEngine()` before the first job. An engine only has to export
 `nest(geometry, renderContext, callback, options)` with the same
-progress/result/abort contract as the built-in one. See
+progress/result/abort contract as the built-in ones. See
 `src/geometry/engine.mjs`.
 
 ### End-user distribution
@@ -39,7 +46,11 @@ progress/result/abort contract as the built-in one. See
 `build-distribution.ps1` builds a self-contained CorelDRAW folder
 (`dist\DeepnestCorel`) with the server embedded inside the addon, so the user
 only loads the `.CGSaddon` â€” no Node install, no server to start. See
-[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The addon starts the embedded
+server when the nesting form opens and stops it when the form closes, so no
+orphan `node` process is left behind (a server left by an older build is
+detected and restarted). The form's advanced settings map to the native OpenNest
+options listed above.
 
 ## Fork History
 
@@ -260,10 +271,13 @@ improving until stopped or `execution.timeLimitMs` elapses). Lifecycle:
 configured `execution.timeLimitMs`). Concurrency is `maxConcurrentJobs = 1`;
 extra jobs are queued and start automatically.
 
-`config` is passed through to the engine (spacing, rotations, populationSize,
-mutationRate, placementType, mergeLines, curveTolerance, simplify, timeRatio,
-units, scale, endpointTolerance, ...). The adapter reserves `bin`,
+`config` is passed through to the engine. With the default OpenNest engine the
+native `nfp_nest` options apply: `spacing`, `rotations`, `placementType`,
+`populationSize`, `mutationRate`, `seed`, `generations`, `tryAllRotations`,
+`exactNfp`, `exactVoids`, `curveTolerance`, `timeLimitSeconds`, `units`, `scale`.
+Both engines accept `spacing` and `rotations`. The adapter reserves `bin`,
 `progressCallback`, `timeout` and rejects them inside `config`.
+`GET /result.svg` is available for SVG input under both engines.
 
 ### Test
 

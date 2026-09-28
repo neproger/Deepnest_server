@@ -50,7 +50,11 @@ The form:
 - stops instantly: the stop request is sent asynchronously and the server
   acknowledges it immediately, tearing the engine down in the background;
 - saves the last entered settings;
-- can apply single-root results to a new `Deepnest Result HHmmss` layer;
+- starts the bundled server when it opens and stops it when it closes, so no
+  orphan `node` process is left behind (a server left by an older build is
+  detected and restarted);
+- can apply single-root results to a new `Deepnest Result HHmmss` layer (the
+  layout is rotated 180° about the sheet centre to match the preview);
 - groups the complete Apply operation into one CorelDRAW undo step.
 
 **Apply to CorelDRAW** is disabled if a selected Corel object produced several
@@ -131,16 +135,21 @@ The compact row contains:
 - spacing in millimeters;
 - rotation variant count (`4` means 0°, 90°, 180°, and 270°).
 
-The expandable settings row contains the Deepnest engine settings:
+The expandable settings row contains the native OpenNest (`nfp_nest`) engine
+settings:
 
-- **Placement** — `gravity` (compact width), `box` (bounding-box area), or
-  `convexhull` (hull area);
-- **Population** — genetic population size;
-- **Mutation, %** — mutation probability;
-- **Tolerance, mm** — SVG flattening tolerance;
-- **Line weight** — shared cutting-line weight in fitness (`timeRatio`);
-- **Merge lines** — reward placements that share compatible cutting lines;
-- **Limit, sec** — optional automatic stop (`0` = run until Stop).
+- **Packing** — `placementType`: `Box`, `Gravity`, or `Squeeze`;
+- **Population** — genetic population size (`populationSize`);
+- **Mutation, %** — mutation rate (`mutationRate`);
+- **Seed** — RNG seed (`seed`);
+- **Generations** — generations per solve (`generations`);
+- **All rotations** — try every rotation, ignoring the rotation count
+  (`tryAllRotations`);
+- **Exact NFP** — use the exact (slower) no-fit-polygon (`exactNfp`);
+- **Exact voids** — exact hole handling (`exactVoids`);
+- **Tolerance, mm** — curve flattening tolerance (`curveTolerance`);
+- **Limit, sec** — optional automatic stop (`timeLimitSeconds`; `0` = run until
+  Stop).
 
 Settings are stored in:
 

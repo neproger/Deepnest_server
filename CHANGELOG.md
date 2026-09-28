@@ -2,6 +2,19 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 fix Corel: parts exported as `<rect>` at the origin were silently
+           dropped by a leftover OnShape hack in `main/svgparser.js`; removed it,
+           so rectangular parts nest again. The Corel addon now exposes the
+           native OpenNest settings, rotates the layout 180° in preview and
+           apply, and stops the bundled server when the nesting form closes
+           (a server left behind by an older build is restarted).
+2026-09-28 make OpenNest the **default** engine; Deepnest is now selected with
+           `DEEPNEST_ENGINE=deepnest`. `GET /result.svg` still works for SVG
+           input under OpenNest (rendered via the existing SVG renderer).
+2026-09-28 add a second engine: OpenNest `nfp_nest` (C++, MIT),
+           vendored under `native/opennest` and built as the `opennest` N-API
+           addon; select with `DEEPNEST_ENGINE=opennest`. Supports non-rectangular
+           sheets and holes/voids.
 2026-09-28 remove the optional ironnest (Rust) engine, its vendored source, the
            Node-API bridge and the adapter. Deepnest is the only shipping engine.
            The pluggable-engine mechanism is kept: engines are selected/installed

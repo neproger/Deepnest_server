@@ -91,12 +91,15 @@ namespace CorelDeepnest.Runtime
             public double SheetHeight;
             public double Spacing;
             public int Rotations;
+            public string PlacementType;
             public int PopulationSize;
             public int MutationRate;
-            public string PlacementType;
-            public bool MergeLines;
+            public int Seed;
+            public int Generations;
+            public bool AllRotations;
+            public bool ExactNfp;
+            public bool ExactVoids;
             public double CurveTolerance;
-            public double TimeRatio;
             public int TimeLimitSeconds;
         }
 
@@ -228,6 +231,104 @@ namespace CorelDeepnest.Runtime
         }
 
         /// <summary>
+        /// Stop the bundled server started by this addon (node.exe running from
+        /// %LOCALAPPDATA%\CorelDeepnest\Server). Called when the nesting form
+        /// closes so no orphan node process is left behind.
+        /// </summary>
+        private static void StopServer()
+        {
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName("node"))
+                {
+                    try
+                    {
+                        string path = null;
+                        try
+                        {
+                            path = process.MainModule != null
+                                ? process.MainModule.FileName
+                                : null;
+                        }
+                        catch
+                        {
+                            path = null;
+                        }
+
+                        if (path != null &&
+                            path.IndexOf("CorelDeepnest", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            path.IndexOf("Server", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            process.Kill();
+                            process.WaitForExit(5000);
+                        }
+                    }
+                    catch
+                    {
+                        // Best effort: the process may have exited already.
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+            catch
+            {
+                // Never let shutdown problems surface to the user.
+            }
+        }
+
+        /// <summary>
+        /// Directory of a running bundled server (node.exe under
+        /// %LOCALAPPDATA%\CorelDeepnest\Server), or null when none is running.
+        /// Used to detect a stale server left by an older build.
+        /// </summary>
+        private static string RunningServerDirectory()
+        {
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName("node"))
+                {
+                    try
+                    {
+                        string path = null;
+                        try
+                        {
+                            path = process.MainModule != null
+                                ? process.MainModule.FileName
+                                : null;
+                        }
+                        catch
+                        {
+                            path = null;
+                        }
+
+                        if (path != null &&
+                            path.IndexOf("CorelDeepnest", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                            path.IndexOf("Server", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            return Path.GetDirectoryName(path);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip processes we cannot inspect.
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+            catch
+            {
+                // Treat as "unknown running server".
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Ensures the Deepnest server is running; starts it from the saved (or
         /// user-chosen) folder if it is not. Returns false with a message on
         /// failure. Must be called on the UI thread (folder picker).
@@ -237,7 +338,20 @@ namespace CorelDeepnest.Runtime
             error = null;
             if (IsServerHealthy())
             {
-                return true;
+                string running = RunningServerDirectory();
+                string provisioned = ProvisionedServerDirectory();
+                if (running == null || provisioned == null ||
+                    string.Equals(
+                        Path.GetFullPath(running).TrimEnd('\\'),
+                        Path.GetFullPath(provisioned).TrimEnd('\\'),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // A server from an older build is answering on the port; stop it
+                // so the current bundled server is started below.
+                StopServer();
             }
 
             string directory = ProvisionedServerDirectory();
@@ -522,16 +636,22 @@ namespace CorelDeepnest.Runtime
 
         private static Dictionary<string, object> BuildConfig(NestingOptions options)
         {
+            // Native OpenNest (nfp_nest) options only. Deepnest-only knobs
+            // (mergeLines, timeRatio, convexhull) are intentionally absent: the
+            // OpenNest engine ignores them.
             return new Dictionary<string, object>
             {
                 { "spacing", options.Spacing },
                 { "rotations", options.Rotations },
+                { "placementType", options.PlacementType },
                 { "populationSize", options.PopulationSize },
                 { "mutationRate", options.MutationRate },
-                { "placementType", options.PlacementType },
-                { "mergeLines", options.MergeLines },
-                { "curveTolerance", options.CurveTolerance },
-                { "timeRatio", options.TimeRatio }
+                { "seed", options.Seed },
+                { "generations", options.Generations },
+                { "tryAllRotations", options.AllRotations },
+                { "exactNfp", options.ExactNfp },
+                { "exactVoids", options.ExactVoids },
+                { "curveTolerance", options.CurveTolerance }
             };
         }
 
@@ -785,13 +905,16 @@ namespace CorelDeepnest.Runtime
             private readonly NumericUpDown height = NumberInput(500);
             private readonly NumericUpDown spacing = NumberInput(0);
             private readonly NumericUpDown rotations = NumberInput(4, 0);
+            private readonly ComboBox placementType = new ComboBox();
             private readonly NumericUpDown populationSize = NumberInput(10, 0);
             private readonly NumericUpDown mutationRate = NumberInput(10, 0);
-            private readonly ComboBox placementType = new ComboBox();
+            private readonly NumericUpDown seed = NumberInput(30, 0);
+            private readonly NumericUpDown generations = NumberInput(10, 0);
             private readonly NumericUpDown curveTolerance = NumberInput(0.3M, 3);
-            private readonly NumericUpDown timeRatio = NumberInput(0.5M, 2);
             private readonly NumericUpDown timeLimitSeconds = NumberInput(0, 0);
-            private readonly CheckBox mergeLines = new CheckBox();
+            private readonly CheckBox allRotations = new CheckBox();
+            private readonly CheckBox exactNfp = new CheckBox();
+            private readonly CheckBox exactVoids = new CheckBox();
             private readonly ToolTip help = new ToolTip();
             private readonly Button run = new Button();
             private readonly Button stop = new Button();
@@ -815,25 +938,33 @@ namespace CorelDeepnest.Runtime
                 width.Minimum = 0.01M;
                 height.Minimum = 0.01M;
                 rotations.Minimum = 1;
-                rotations.Maximum = 16;
-                populationSize.Minimum = 3;
-                populationSize.Maximum = 64;
-                mutationRate.Minimum = 2;
-                mutationRate.Maximum = 64;
-                curveTolerance.Minimum = 0.1M;
+                rotations.Maximum = 3600;
+                populationSize.Minimum = 1;
+                populationSize.Maximum = 100000;
+                mutationRate.Minimum = 0;
+                mutationRate.Maximum = 100;
+                seed.Minimum = 0;
+                seed.Maximum = 100000;
+                generations.Minimum = 1;
+                generations.Maximum = 100000;
+                curveTolerance.Minimum = 0.01M;
                 curveTolerance.Maximum = 100;
                 curveTolerance.Increment = 0.01M;
-                timeRatio.Maximum = 1000;
-                timeRatio.Increment = 0.1M;
                 timeLimitSeconds.Maximum = 86400;
                 placementType.DropDownStyle = ComboBoxStyle.DropDownList;
-                placementType.Items.AddRange(new object[] { "gravity", "box", "convexhull" });
-                placementType.SelectedIndex = 0;
+                placementType.Items.AddRange(new object[] { "Box", "Gravity", "Squeeze" });
+                placementType.SelectedIndex = 1;
                 placementType.Width = 100;
-                mergeLines.Text = "Объединять линии";
-                mergeLines.Checked = true;
-                mergeLines.AutoSize = true;
-                mergeLines.Margin = new Padding(8, 23, 8, 0);
+                allRotations.Text = "Все повороты";
+                allRotations.Checked = true;
+                allRotations.AutoSize = true;
+                allRotations.Margin = new Padding(8, 23, 8, 0);
+                exactNfp.Text = "Точный NFP";
+                exactNfp.AutoSize = true;
+                exactNfp.Margin = new Padding(8, 23, 8, 0);
+                exactVoids.Text = "Точные пустоты";
+                exactVoids.AutoSize = true;
+                exactVoids.Margin = new Padding(8, 23, 8, 0);
                 Text = "Deepnest Server — сборка " + BuildInfo.Id;
                 Width = 920;
                 Height = 680;
@@ -865,11 +996,14 @@ namespace CorelDeepnest.Runtime
                 };
                 AddField(advancedFields, "Размещение", placementType);
                 AddField(advancedFields, "Популяция", populationSize);
-                AddField(advancedFields, "Мутация, %", mutationRate);
+                AddField(advancedFields, "Мутация", mutationRate);
+                AddField(advancedFields, "Сиид", seed);
+                AddField(advancedFields, "Поколений", generations);
                 AddField(advancedFields, "Точность, мм", curveTolerance);
-                AddField(advancedFields, "Вес линий", timeRatio);
                 AddField(advancedFields, "Лимит, сек", timeLimitSeconds);
-                advancedFields.Controls.Add(mergeLines);
+                advancedFields.Controls.Add(allRotations);
+                advancedFields.Controls.Add(exactNfp);
+                advancedFields.Controls.Add(exactVoids);
 
                 help.SetToolTip(width, "Ширина листа в миллиметрах.");
                 help.SetToolTip(height, "Высота листа в миллиметрах.");
@@ -878,16 +1012,23 @@ namespace CorelDeepnest.Runtime
                 help.SetToolTip(rotations,
                     "Число равномерных вариантов поворота, а не градусы. 4 = 0, 90, 180 и 270.");
                 help.SetToolTip(placementType,
-                    "Стратегия размещения: gravity — компактнее по ширине, box — меньше площадь описанного прямоугольника, convexhull — площадь оболочки.");
-                help.SetToolTip(populationSize, "Размер популяции генетического алгоритма. Больше — шире поиск.");
-                help.SetToolTip(mutationRate, "Вероятность мутации в процентах.");
+                    "Стратегия размещения: Gravity — компактнее, Box — меньше описанный прямоугольник, Squeeze — максимально сжать.");
+                help.SetToolTip(populationSize, "Размер популяции генетического алгоритма.");
+                help.SetToolTip(mutationRate, "Вероятность мутации, %.");
+                help.SetToolTip(seed,
+                    "Случайное зерно движка: одинаковое зерно — одинаковый результат.");
+                help.SetToolTip(generations,
+                    "Поколений за один прогон. Меньше — чаще перезапуск с новым зерном, результат уточняется постепенно.");
                 help.SetToolTip(curveTolerance,
-                    "Точность сглаживания SVG, мм (входная геометрия).");
-                help.SetToolTip(timeRatio,
-                    "Вес длины общих линий реза в приспособленности: 0 — только материал, 1 — только время резки.");
+                    "Точность сглаживания входной геометрии, мм.");
                 help.SetToolTip(timeLimitSeconds,
                     "0 — работать до кнопки «Стоп»; положительное значение — автостоп, сек.");
-                help.SetToolTip(mergeLines, "Поощрять раскладки с общими линиями реза.");
+                help.SetToolTip(allRotations,
+                    "Перебирать все ориентации каждой детали (до 8) для более плотной укладки.");
+                help.SetToolTip(exactNfp,
+                    "Точный NFP без упрощения: детали вплотную, без зазора; медленнее.");
+                help.SetToolTip(exactVoids,
+                    "Точное вычитание пустот/отверстий листа (для невыпуклых void); медленнее.");
 
                 run.Text = "Разложить";
                 run.Click += RunClick;
@@ -946,7 +1087,12 @@ namespace CorelDeepnest.Runtime
                 Controls.Add(fields);
 
                 LoadSettings();
-                FormClosed += delegate { SaveSettings(); };
+                FormClosed += delegate
+                {
+                    SaveSettings();
+                    // The bundled server lives only while the form is open.
+                    StopServer();
+                };
             }
 
             private void RunClick(object sender, EventArgs e)
@@ -1173,12 +1319,15 @@ namespace CorelDeepnest.Runtime
                     SheetHeight = Convert.ToDouble(height.Value),
                     Spacing = Convert.ToDouble(spacing.Value),
                     Rotations = Convert.ToInt32(rotations.Value),
+                    PlacementType = Convert.ToString(placementType.SelectedItem),
                     PopulationSize = Convert.ToInt32(populationSize.Value),
                     MutationRate = Convert.ToInt32(mutationRate.Value),
-                    PlacementType = Convert.ToString(placementType.SelectedItem),
-                    MergeLines = mergeLines.Checked,
+                    Seed = Convert.ToInt32(seed.Value),
+                    Generations = Convert.ToInt32(generations.Value),
+                    AllRotations = allRotations.Checked,
+                    ExactNfp = exactNfp.Checked,
+                    ExactVoids = exactVoids.Checked,
                     CurveTolerance = Convert.ToDouble(curveTolerance.Value),
-                    TimeRatio = Convert.ToDouble(timeRatio.Value),
                     TimeLimitSeconds = Convert.ToInt32(timeLimitSeconds.Value)
                 };
             }
@@ -1201,17 +1350,15 @@ namespace CorelDeepnest.Runtime
                     SetNumber(values, "rotations", rotations);
                     SetNumber(values, "populationSize", populationSize);
                     SetNumber(values, "mutationRate", mutationRate);
+                    SetNumber(values, "seed", seed);
+                    SetNumber(values, "generations", generations);
                     SetNumber(values, "curveTolerance", curveTolerance);
-                    SetNumber(values, "timeRatio", timeRatio);
                     SetNumber(values, "timeLimitSeconds", timeLimitSeconds);
 
                     SetCombo(values, "placementType", placementType);
-                    object mergeValue;
-                    if (values.TryGetValue("mergeLines", out mergeValue) &&
-                        mergeValue != null)
-                    {
-                        mergeLines.Checked = Convert.ToBoolean(mergeValue);
-                    }
+                    SetBool(values, "tryAllRotations", allRotations);
+                    SetBool(values, "exactNfp", exactNfp);
+                    SetBool(values, "exactVoids", exactVoids);
                 }
                 catch
                 {
@@ -1232,12 +1379,15 @@ namespace CorelDeepnest.Runtime
                         { "sheetHeight", options.SheetHeight },
                         { "spacing", options.Spacing },
                         { "rotations", options.Rotations },
+                        { "placementType", options.PlacementType },
                         { "populationSize", options.PopulationSize },
                         { "mutationRate", options.MutationRate },
-                        { "placementType", options.PlacementType },
-                        { "mergeLines", options.MergeLines },
+                        { "seed", options.Seed },
+                        { "generations", options.Generations },
+                        { "tryAllRotations", options.AllRotations },
+                        { "exactNfp", options.ExactNfp },
+                        { "exactVoids", options.ExactVoids },
                         { "curveTolerance", options.CurveTolerance },
-                        { "timeRatio", options.TimeRatio },
                         { "timeLimitSeconds", options.TimeLimitSeconds }
                     }));
                 }
@@ -1275,6 +1425,18 @@ namespace CorelDeepnest.Runtime
                 {
                     control.SelectedIndex = index;
                 }
+            }
+
+            private static void SetBool(Dictionary<string, object> values,
+                string name, CheckBox control)
+            {
+                object value;
+                if (!values.TryGetValue(name, out value) || value == null)
+                {
+                    return;
+                }
+
+                control.Checked = Convert.ToBoolean(value);
             }
 
             private static string SettingsPath()
@@ -1459,12 +1621,14 @@ namespace CorelDeepnest.Runtime
                             }
                             path.AddPolygon(TransformPolygon(
                                 contour.Points, cos, sin, placement, placementSheetX,
-                                placementSheetY, sheetHeight, scale));
+                                placementSheetY, (float)model.SheetWidth,
+                                (float)model.SheetHeight, scale));
                             foreach (List<GeometryPoint> hole in contour.Holes)
                             {
                                 path.AddPolygon(TransformPolygon(
                                     hole, cos, sin, placement, placementSheetX,
-                                    placementSheetY, sheetHeight, scale));
+                                    placementSheetY, (float)model.SheetWidth,
+                                    (float)model.SheetHeight, scale));
                             }
                         }
                         if (path.PointCount == 0)
@@ -1484,7 +1648,7 @@ namespace CorelDeepnest.Runtime
             private static System.Drawing.PointF[] TransformPolygon(
                 List<GeometryPoint> points, double cos, double sin,
                 PreviewPlacement placement, float placementSheetX,
-                float originY, float sheetHeight, float scale)
+                float originY, float sheetWidth, float sheetHeight, float scale)
             {
                 var polygon = new System.Drawing.PointF[points.Count];
                 for (int index = 0; index < points.Count; index++)
@@ -1492,9 +1656,15 @@ namespace CorelDeepnest.Runtime
                     GeometryPoint point = points[index];
                     double worldX = point.X * cos - point.Y * sin + placement.X;
                     double worldY = point.X * sin + point.Y * cos + placement.Y;
+                    // Rotate the whole placement 180 degrees about the sheet
+                    // centre: (x, y) -> (W - x, H - y). This matches
+                    // `ApplyPlacements`, which applies the same rotation in Corel.
+                    // Server coordinates are Y-down from the sheet's top edge.
+                    double flippedX = sheetWidth - worldX;
+                    double flippedY = sheetHeight - worldY;
                     polygon[index] = new System.Drawing.PointF(
-                        placementSheetX + (float)worldX * scale,
-                        originY + sheetHeight - (float)worldY * scale);
+                        placementSheetX + (float)flippedX * scale,
+                        originY + (float)flippedY * scale);
                 }
                 return polygon;
             }

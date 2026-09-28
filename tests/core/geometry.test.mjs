@@ -250,3 +250,29 @@ test("SVG input flows through canonical geometry into the engine", async () => {
   assert.equal(typeof payload.result[0].x, "number");
   assert.equal(typeof payload.result[0].rotation, "number");
 });
+
+test("a Corel-style <rect> part at the origin is not dropped", async () => {
+  // Corel exports a rectangle shape as a bare <rect> with no x/y and a
+  // viewBox whose ratio differs from the mm width, so the parser applies a
+  // scale transform. Regression: a legacy "drop the OnShape background rect at
+  // 0/0" heuristic used to silently discard exactly this legitimate part.
+  const binSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1220mm" height="2430mm" ' +
+    'viewBox="0 0 1220 2430"><rect x="0" y="0" width="1220" height="2430"/></svg>';
+  const partSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1200mm" height="90mm" ' +
+    'viewBox="0 0 136.2397 10.218"><rect width="136.2397" height="10.218"/></svg>';
+
+  const { geometry } = await parseSvgInput(
+    [{ file: "part-1", svg: partSvg, rigid: true }],
+    { bin: binSvg, units: "mm", scale: 25.4, curveTolerance: 1 }
+  );
+
+  assert.equal(geometry.parts.length, 1, "the rectangle part must be kept");
+  const xs = geometry.parts[0].polygontree.map((point) => point.x);
+  const ys = geometry.parts[0].polygontree.map((point) => point.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  assert.ok(Math.abs(width - 1200) < 1, `width should be ~1200, got ${width}`);
+  assert.ok(Math.abs(height - 90) < 1, `height should be ~90, got ${height}`);
+});

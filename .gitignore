@@ -21,3 +21,6 @@ node_modules/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Vendored OpenNest source is tracked; CMake build dirs are not.
+/native/opennest/build/

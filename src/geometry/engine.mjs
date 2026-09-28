@@ -30,9 +30,13 @@ import {
 export { registerEngine, listEngines } from "./engine-registry.mjs";
 export { DEFAULT_ENGINE_CONFIG, resolveEngineConfig } from "./engines/deepnest.mjs";
 
-export const DEFAULT_ENGINE = "deepnest";
+export const DEFAULT_ENGINE = "opennest";
 
-registerEngine(DEFAULT_ENGINE, () => import("./engines/deepnest.mjs"));
+registerEngine("deepnest", () => import("./engines/deepnest.mjs"));
+// Default engine: OpenNest (C++ NFP/GA, native/opennest). It is only usable once
+// its addon is built; selecting it without the build fails with a clear
+// ENGINE_UNAVAILABLE error.
+registerEngine(DEFAULT_ENGINE, () => import("./engines/opennest.mjs"));
 
 async function resolveSelectedEngine(options) {
   const name = options.engine || process.env.DEEPNEST_ENGINE || DEFAULT_ENGINE;
