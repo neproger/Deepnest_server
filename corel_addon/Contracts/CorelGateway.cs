@@ -323,6 +323,7 @@ namespace CorelDeepnest.Contracts
                     applied++;
                 }
 
+                var sheetShapes = new List<object>();
                 foreach (int sheetInstanceId in usedSheetInstances)
                 {
                     double instanceLeft = sheetLeft + sheetInstanceId *
@@ -335,12 +336,19 @@ namespace CorelDeepnest.Contracts
                         0, 0, 0, 0);
                     sheet.Name = "Deepnest Sheet " + (sheetInstanceId + 1);
                     sheet.OrderToBack();
+                    sheetShapes.Add((object)sheet);
                 }
 
+                // Select the cut objects AND the sheet frames, so the whole result
+                // (artwork + sheet outlines) can be moved/copied/checked at once.
                 document.ClearSelection();
                 foreach (dynamic copy in copies)
                 {
                     copy.AddToSelection();
+                }
+                foreach (object sheetShape in sheetShapes)
+                {
+                    ((dynamic)sheetShape).AddToSelection();
                 }
             }
             finally
