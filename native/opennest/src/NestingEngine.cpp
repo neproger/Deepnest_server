@@ -440,6 +440,31 @@ void NestingEngine::launchWorkersParallel(const std::vector<NestItem>& parts) {
         if (!unionPairs.empty()) {
             NfpWorker::UseParallel = true;                 // saturate all cores for the batch
             auto computed = background.pmapDeepNest(unionPairs);
+
+            // Attach hole inner-NFPs (pockets) exactly like the serial path
+            // (BackgroundStart/evaluateCandidate do pmapDeepNest + thenIterate). The pre-warm used to
+            // cache the RAW outer NFPs only; any pair whose A has holes was then served from the cache
+            // by getOuterNfp WITHOUT its hole pockets, so island placement (a part inside another
+            // part's hole) silently stopped working whenever the parallel-population path was active.
+            NfpWorker::UseParallel = false;                // thenIterate/getInnerNfp run serially here
+            background.data.config = config;               // thenIterate reads the config from `data`
+            {
+                std::vector<std::shared_ptr<NFP>> preParts;
+                for (auto& d : datas) {
+                    for (size_t j = 0; j < d.individual.placements.size(); j++) {
+                        auto pl = d.individual.placements[j];
+                        // cloneTree() does not copy source/Id; thenIterate->getPart() keys on source.
+                        pl->source = d.sources[j];
+                        pl->Id = d.ids[j];
+                        preParts.push_back(pl);
+                    }
+                }
+                for (auto& pr : computed) {
+                    if (pr.Asource < 0 || pr.Bsource < 0) continue;
+                    background.thenIterate(pr, preParts);   // inserts the pocket-inclusive NFP into db
+                }
+            }
+
             for (auto& pr : computed) {
                 if (pr.Asource < 0 || pr.Bsource < 0) continue;   // skipped by abort/deadline — don't cache
                 DbCacheKey doc;

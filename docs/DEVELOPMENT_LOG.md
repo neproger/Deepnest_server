@@ -1884,3 +1884,39 @@ OpenNest (`petrasvestartas/OpenNest`, MIT) содержит C++ движок `nf
 Итоговый отступ считается как `sheetSpacing + 8 × curveTolerance` (для сложных
 деталей). Подсказки к «Точность» и «Отступ от края» обновлены.
 
+## 2026-09-28 — Islands: вложенность деталей в дырки (исправлено)
+
+### Симптом
+
+Деталь кладётся в дырку другой детали только при «Все повороты» = on и
+`rotations ≥ 2`. При `rotations=1` или «Все повороты» = off — никогда. Флаг
+`useHoles` в C-ABI — no-op, отдельного переключателя нет.
+
+### Первопричина
+
+Параллельный путь GA (`NestingEngine::launchWorkersParallel`, режим по умолчанию
+`mode=1, useParallel=1`) прогревает кэш NFP через `pmapDeepNest`, но, в отличие от
+serial-пути (`BackgroundStart`/`evaluateCandidate`), **не вызывает `thenIterate`**.
+Поэтому в `window.db` попадали «внешние» NFP без карманов отверстий (точный
+`getInnerNfp` по `A.children`). Затем `placeParts` → `getOuterNfp` отдаёт их из
+кэша (cache hit) уже без карманов, и позиции внутри дырок в перебор кандидатов не
+попадают. Serial-путь карманы добавляет — поэтому с `useParallel=false` islands
+работали всегда.
+
+### Исправление
+
+`NestingEngine::launchWorkersParallel`: после `pmapDeepNest` собирается `preParts`
+из `datas` (клонам явно выставляются `source`/`Id` — `cloneTree` их не копирует),
+задаётся `data.config`, и для каждой пары вызывается `thenIterate` — как в
+serial-пути. Так кэш получает NFP с карманами.
+
+### Проверки
+
+- Рамка 200/борт 25 (дырка 150) + деталь 140 на листе 250, параллельный режим:
+  islands размещаются при `rotations=1,2,4,8` и `tryAllRotations` on/off.
+- `npm test` — **57/57 pass** (+1 регрессионный тест
+  `opennest nests a part inside another part's hole (islands)` в
+  `tests/core/opennest-engine.test.mjs`).
+- Прямоугольные детали и незатронутые кейсы прогнаны без изменений.
+
+

@@ -2,6 +2,11 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 fix OpenNest island nesting: the generation-parallel NFP pre-warm
+           cached outer NFPs without their hole "pockets" (it skipped
+           thenIterate), so placing a part inside another part's hole silently
+           depended on the rotation search. Islands now work with any settings,
+           including `rotations=1` / `tryAllRotations` off.
 2026-09-28 Corel form: add an explicit sheet-edge offset (`sheetSpacing`). The
            visible edge gap on non-rectangular parts is the sum of that offset
            and a conservative engine margin, `8 × curveTolerance`.
