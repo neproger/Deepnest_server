@@ -13,6 +13,12 @@
 > directly, several regions fall back to their convex hull (the engine models a
 > single outer + holes, not multi-region bodies). The containment `toTree()`
 > described below is no longer the collision model for rigid input.
+>
+> **Update (2026-09-28, later):** the Deepnest engine was removed. The SVG import
+> pipeline below now lives in `main/svg-importer.mjs` (extracted from
+> `main/deepnest.js`); `main/deepnest.js`, `main/background.js` and
+> `main/processPair*.mjs` no longer exist. OpenNest is the only engine. The rest
+> of this document is retained as the historical analysis of that pipeline.
 
 ## Current Flow
 

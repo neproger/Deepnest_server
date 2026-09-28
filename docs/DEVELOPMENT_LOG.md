@@ -1999,3 +1999,33 @@ serial-пути. Так кэш получает NFP с карманами.
 Пересечения устранены (в т.ч. «i» и вложенные рамки — как оболочка). Плотность
 вложенности (в зазоры между кольцами) пока недостижима; для неё позже — корректная
 multi-region на Clipper-наборе путей (без Boost-классификации) либо Merge в Corel.
+
+## 2026-09-28 — Выпиливание Deepnest (OpenNest — единственный движок)
+
+### Что сделано
+
+- **Парсер вынесен** из `main/deepnest.js` в новый `main/svg-importer.mjs`
+  (`createImporter(config).importsvg(...)` = `load → clean → getParts/toTree`),
+  `main/deepnest.js` удалён.
+- **Конфиг движка** (`DEFAULT_ENGINE_CONFIG`/`resolveEngineConfig`) переехал в
+  `src/geometry/engine-config.mjs`; `src/geometry/engine.mjs` больше не
+  регистрирует `"deepnest"` (остался только `"opennest"`, он же дефолт).
+- Удалены: `main/background.js`, `main/processPair.mjs`, `main/processPairs.node.mjs`,
+  `src/geometry/engines/deepnest.mjs`, `src/addon.cc`, `src/minkowski.cc`,
+  `src/polygon/` (boost старого аддона), `main/util/simplify.js`,
+  `main/util/d3-polygon.js`.
+- `binding.gyp` собирает только `opennest`; из `package.json` убран `nan`;
+  `build-distribution.ps1` кладёт в `server.zip` только `opennest.node`
+  (и падает, если он не собран).
+- `svg-adapter.mjs` использует `createImporter` (не `DeepNest`).
+- Тесты: удалён `native-addon.test.mjs`; из `geometry.test.mjs` убраны тесты
+  Deepnest-воркера/движка (парсер-тесты переведены на `createImporter`); из
+  `winding.test.mjs` убраны тесты нативного `calculateNFP`; в
+  `engine-registry.test.mjs` проверка `opennest` вместо `deepnest`.
+- `LICENSES.md` и доки обновлены.
+
+### Проверки
+
+- `npm install` собирает только `build\Release\opennest.node`.
+- `npm test` — **54/54 pass**.
+

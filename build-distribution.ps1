@@ -36,13 +36,12 @@ Copy-Item -LiteralPath (Join-Path $root "src\api") (Join-Path $serverDir "src\ap
 Copy-Item -LiteralPath (Join-Path $root "src\geometry") (Join-Path $serverDir "src\geometry") -Recurse
 Copy-Item -LiteralPath (Join-Path $root "src\jobs") (Join-Path $serverDir "src\jobs") -Recurse
 New-Item -ItemType Directory -Path (Join-Path $serverDir "build\Release") -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $root "build\Release\addon.node") (Join-Path $serverDir "build\Release")
-# Optional second engine (OpenNest). Ship it when it has been built; the server
-# runs fine without it (Deepnest stays the default).
+# Bundled nesting engine (OpenNest). It must be built first (npm install).
 $opennestAddon = Join-Path $root "build\Release\opennest.node"
-if (Test-Path -LiteralPath $opennestAddon) {
-    Copy-Item -LiteralPath $opennestAddon (Join-Path $serverDir "build\Release")
+if (-not (Test-Path -LiteralPath $opennestAddon)) {
+    throw "opennest.node is missing. Run `npm install` (or `npm run build:native`) first."
 }
+Copy-Item -LiteralPath $opennestAddon (Join-Path $serverDir "build\Release")
 
 Write-Host "2/6 Bundle the Node runtime and production dependencies"
 $nodeExe = (Get-Command node).Source
@@ -53,7 +52,7 @@ $serverPackage = @'
   "name": "deepnest-server",
   "private": true,
   "version": "1.0.0",
-  "description": "Bundled Deepnest nesting server (Deepnest engine).",
+  "description": "Bundled Deepnest nesting server (OpenNest engine).",
   "dependencies": {
     "bindings": "^1.5.0",
     "express": "^4.21.2",

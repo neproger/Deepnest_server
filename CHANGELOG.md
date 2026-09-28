@@ -2,6 +2,14 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 **remove the Deepnest engine entirely**: the JS GA (`main/deepnest.js`,
+           `main/background.js`, `main/processPair*.mjs`) and the native
+           Minkowski addon (`src/addon.cc`, `src/minkowski.cc`, `src/polygon`).
+           OpenNest is the only engine now. The SVG importer is extracted to
+           `main/svg-importer.mjs`; engine config moved to
+           `src/geometry/engine-config.mjs`. `binding.gyp` builds only
+           `opennest`; `DEEPNEST_ENGINE=deepnest` is gone. Docs/licenses and
+           `dist\DeepnestCorel` updated.
 2026-09-28 roll back the engine **multi-region parts**: the per-region Minkowski
            path could place parts on top of each other (reproduced with a
            synthetic "i" and with real Corel exports; the engine's own

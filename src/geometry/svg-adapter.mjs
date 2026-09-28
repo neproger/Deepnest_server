@@ -1,8 +1,8 @@
 import path from "path";
 import { createRequire } from "node:module";
-import { DeepNest } from "../../main/deepnest.js";
+import { createImporter } from "../../main/svg-importer.mjs";
 import { clonePolygonTree } from "./canonical.mjs";
-import { resolveEngineConfig } from "./engine.mjs";
+import { resolveEngineConfig } from "./engine-config.mjs";
 import { buildMaterialRegions } from "./material.mjs";
 
 const require = createRequire(import.meta.url);
@@ -26,8 +26,8 @@ export async function parseSvgInput(svgInput, options = {}) {
   const ratio = units === "mm" ? 1 / 25.4 : 1;
   const { deepNestConfig } = resolveEngineConfig(options);
 
-  // Throwaway importer: svgparser needs a DeepNest instance for config/scale.
-  const importer = new DeepNest(new EventTarget(), deepNestConfig);
+  // Throwaway importer: the SVG parser needs the engine config (scale/tolerances).
+  const importer = createImporter(deepNestConfig);
 
   const bin = options.bin;
   const binSvg =

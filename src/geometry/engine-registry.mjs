@@ -3,7 +3,7 @@
  *
  * The geometry/Job layers never hard-code an engine: they ask this registry for
  * the implementation selected by `DEEPNEST_ENGINE` (or `options.engine`). The
- * built-in Deepnest engine is registered as `"deepnest"`; another engine can be
+ * built-in OpenNest engine is registered as `"opennest"`; another engine can be
  * installed without touching the rest of the code.
  *
  * An engine is a module exporting a `nest(geometry, renderContext, callback,
@@ -96,3 +96,4 @@ export async function resolveEngine(name) {
   }
   return nest;
 }
+

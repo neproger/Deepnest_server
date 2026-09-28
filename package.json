@@ -30,7 +30,6 @@
     "@types/express": "^5.0.0",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.10.1",
-    "nan": "^2.22.0",
     "node-addon-api": "^8.1.0"
   },
   "dependencies": {

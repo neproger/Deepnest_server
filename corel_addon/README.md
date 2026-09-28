@@ -28,14 +28,14 @@ For each selected top-level Shape or Group, the addon creates a temporary Corel
 document, converts text in the temporary copy to curves, and exports the
 selection as SVG. The active document and source objects are not modified.
 
-The server uses the original Deepnest SVG pipeline:
+The server uses the SVG import pipeline:
 
 ```text
 load -> clean -> getParts -> polygon trees -> nesting
 ```
 
 Nested contours become holes. Independent outer contours become independent
-physical parts, matching the original Deepnest UI. If one Corel export contains
+physical parts. If one Corel export contains
 several outer roots, their result ids are `part-N#1`, `part-N#2`, and so on.
 
 The form:

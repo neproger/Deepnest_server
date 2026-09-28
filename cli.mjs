@@ -80,7 +80,7 @@ program
   )
   .requiredOption("-o, --output <output>", "Output dir")
   .option("-t, --timeout [timeout]", (t) => parseInt(t))
-  .option("-c, --config [config]", "Path to DeepNest config file")
+  .option("-c, --config [config]", "Path to engine config file")
   .argument("<paths...>")
   .action(async (paths, { bin, timeout = 60_000, config, output }) => {
     const files = (
@@ -109,3 +109,4 @@ program
   });
 
 program.parse();
+

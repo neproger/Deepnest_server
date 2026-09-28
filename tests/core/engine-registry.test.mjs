@@ -49,8 +49,7 @@ function fakeEngine(onCall) {
   };
 }
 
-test("registers the built-in deepnest engine by default", () => {
-  assert.ok(listEngines().includes("deepnest"));
+test("registers the built-in opennest engine", () => {
   assert.ok(listEngines().includes("opennest"));
 });
 

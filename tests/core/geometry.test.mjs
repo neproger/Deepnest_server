@@ -9,8 +9,7 @@ import "../../index.node.mjs";
 
 import { parseSvgInput } from "../../src/geometry/svg-adapter.mjs";
 import { nestGeometry } from "../../src/geometry/engine.mjs";
-
-const { DeepNest } = await import("../../main/deepnest.js");
+import { createImporter } from "../../main/svg-importer.mjs";
 
 const fixtures = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -21,17 +20,7 @@ const fixtures = path.resolve(
 const config = {
   clipperScale: 10000000,
   curveTolerance: 0.72,
-  spacing: 0,
-  rotations: 4,
-  populationSize: 4,
-  mutationRate: 10,
-  threads: 1,
-  placementType: "gravity",
-  mergeLines: true,
-  timeRatio: 0.5,
   scale: 72,
-  simplify: false,
-  units: "mm",
 };
 
 const pointKeys = (poly) => {
@@ -40,31 +29,10 @@ const pointKeys = (poly) => {
   return [...keys].sort();
 };
 
-const arrayProps = (poly) =>
-  Object.keys(poly)
-    .filter((key) => Number.isNaN(Number(key)))
-    .sort();
-
-function captureFirstPayload(deepNest) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("no background-start payload")),
-      5000
-    );
-    const handler = ({ detail }) => {
-      clearTimeout(timer);
-      deepNest.eventEmitter.removeEventListener("background-start", handler);
-      resolve(detail);
-    };
-    deepNest.eventEmitter.addEventListener("background-start", handler);
-    deepNest.start();
-  });
-}
-
 test("SVG parsing produces a plain polygon tree with a hole", async () => {
   const svg = await readFile(path.resolve(fixtures, "part-hole.svg"), "utf8");
-  const deepNest = new DeepNest(new EventTarget(), config);
-  const [part] = deepNest.importsvg(null, null, svg);
+  const importer = createImporter(config);
+  const [part] = importer.importsvg(null, null, svg);
 
   assert.equal(part.polygontree.length, 4, "outer polygon has 4 points");
   assert.ok(
@@ -82,7 +50,7 @@ test("SVG parsing produces a plain polygon tree with a hole", async () => {
   assert.equal(part.quantity, 1);
 });
 
-test("one SVG input follows original Deepnest root-to-part behavior", async () => {
+test("one SVG input follows original root-to-part behavior", async () => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="10" height="10"/>
     <rect x="30" y="0" width="10" height="10"/>
@@ -136,75 +104,6 @@ test("rigid SVG input uses one conservative hull and retains preview roots", asy
   assert.equal(geometry.parts[0].polygontree.length, 4);
   assert.equal(renderContext.previewParts.length, 1);
   assert.equal(renderContext.previewParts[0].polygontrees.length, 2);
-});
-
-test("worker payload geometry is DOM-free with parallel metadata arrays", async () => {
-  const binSvg = await readFile(path.resolve(fixtures, "bin.svg"), "utf8");
-  const holeSvg = await readFile(path.resolve(fixtures, "part-hole.svg"), "utf8");
-
-  const deepNest = new DeepNest(new EventTarget(), config);
-  const [sheet] = deepNest.importsvg(null, null, binSvg);
-  sheet.sheet = true;
-  deepNest.importsvg(null, null, holeSvg);
-
-  const payload = await captureFirstPayload(deepNest);
-  deepNest.stop();
-
-  const placement = payload.individual.placement;
-  assert.equal(placement.length, 1, "one nestable part");
-  assert.equal(payload.sheets.length, 1, "one sheet");
-  assert.deepEqual(payload.sheetids, [0]);
-  assert.deepEqual(payload.sheetsources, [0]);
-
-  const tree = placement[0];
-  assert.ok(!("svgelements" in tree), "no DOM leaks into worker payload");
-  assert.ok(Array.isArray(tree.children), "hole survives into payload");
-  assert.deepEqual(pointKeys(tree), ["exact", "x", "y"]);
-  assert.deepEqual(arrayProps(tree), ["children", "filename", "id", "source"]);
-  assert.deepEqual(payload.ids, [tree.id]);
-  assert.deepEqual(payload.sources, [tree.source]);
-  assert.deepEqual(payload.filenames, [tree.filename]);
-  assert.equal(payload.individual.rotation.length, 1);
-});
-
-test("engine accepts hand-built polygon trees without the SVG parser", async () => {
-  const sheetTree = [
-    { x: 0, y: 0 },
-    { x: 300, y: 0 },
-    { x: 300, y: 200 },
-    { x: 0, y: 200 },
-  ];
-  sheetTree.children = [];
-
-  const partTree = [
-    { x: 0, y: 0 },
-    { x: 80, y: 0 },
-    { x: 80, y: 50 },
-    { x: 0, y: 50 },
-  ];
-  partTree.children = [
-    [
-      { x: 20, y: 15 },
-      { x: 40, y: 15 },
-      { x: 40, y: 30 },
-      { x: 20, y: 30 },
-    ],
-  ];
-
-  const deepNest = new DeepNest(new EventTarget(), config);
-  deepNest.parts.push({ polygontree: sheetTree, quantity: 1, sheet: true, filename: null });
-  deepNest.parts.push({ polygontree: partTree, quantity: 1, filename: "synthetic" });
-
-  const payload = await captureFirstPayload(deepNest);
-  deepNest.stop();
-
-  assert.equal(payload.individual.placement.length, 1);
-  assert.equal(payload.sheets.length, 1);
-  const tree = payload.individual.placement[0];
-  assert.equal(tree.length, 4);
-  assert.equal(tree.children.length, 1, "synthetic hole preserved");
-  assert.deepEqual(pointKeys(tree), ["exact", "x", "y"]);
-  assert.equal(tree.filename, "synthetic");
 });
 
 test("SVG input flows through canonical geometry into the engine", async () => {
@@ -276,3 +175,4 @@ test("a Corel-style <rect> part at the origin is not dropped", async () => {
   assert.ok(Math.abs(width - 1200) < 1, `width should be ~1200, got ${width}`);
   assert.ok(Math.abs(height - 90) < 1, `height should be ~90, got ${height}`);
 });
+

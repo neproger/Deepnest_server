@@ -86,7 +86,7 @@ function requireNumber(config, key, { min, exclusiveMin, integer } = {}) {
 }
 
 /**
- * Validate the engine options recognized by the default Deepnest engine.
+ * Validate the engine options recognized by the built-in engine.
  * Unknown keys are ignored (the engine passes them through), but the values the
  * engine actually consumes are checked so a bad value produces a 400 instead of
  * a failed job.
@@ -359,7 +359,7 @@ export async function adaptInput(spec) {
   sheet.quantity = spec.bin.mode === "auto"
     ? geometry.parts.reduce((sum, part) => sum + part.quantity, 0)
     : spec.bin.quantity;
-  // Renderer is SVG-specific and loaded only on this path (Deepnest engine).
+  // Renderer is SVG-specific and loaded only on this path.
   const { nestingToSVG } = await import("../../main/nestingToSVG.mjs");
   renderContext.render = nestingToSVG;
 
@@ -490,3 +490,4 @@ export function toExternalResult(data, status, sheetMap) {
     status,
   };
 }
+

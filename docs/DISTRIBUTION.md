@@ -19,8 +19,7 @@ dist\DeepnestCorel\
 ## Требования к машине сборки
 
 - **Node 20+** (используется и для сборки, и для бандла): `node --version`.
-- **Python + Visual Studio C++ Build Tools** — для сборки native-аддона
-  Deepnest (`build\Release\addon.node`) через `npm install` (node-gyp).
+- **Python + Visual Studio C++ Build Tools** — для сборки нативного аддона OpenNest (`build\Release\opennest.node`) через `npm install` (node-gyp).
 - **.NET Framework 4.8 MSBuild** — для сборки Corel-аддона
   (`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\MSBuild.exe`, входит в Windows).
 - CorelDRAW не нужен для сборки (только Corel.Interop для загрузки аддона).
@@ -30,15 +29,15 @@ dist\DeepnestCorel\
 Из корня репозитория:
 
 ```powershell
-npm install                # соберёт native-аддон build\Release\addon.node
+npm install                # соберёт native-аддон OpenNest build\Release\opennest.node
 .\build-distribution.ps1   # соберёт dist\DeepnestCorel
 ```
 
 Скрипт по шагам:
 
 1. готовит приложение сервера во временный каталог `dist\.build-server\server`
-   (`server.mjs`, `index*.mjs`, `main\`, `src\{api,geometry,jobs}`, `build\Release\addon.node`);
-2. кладёт туда `node.exe` (из текущего рантайма — ABI совпадает с addon.node)
+   (`server.mjs`, `index*.mjs`, `main\`, `src\{api,geometry,jobs}`, `build\Release\opennest.node`);
+2. кладёт туда `node.exe` (из текущего рантайма — ABI совпадает с opennest.node)
    и ставит продовые зависимости (`bindings`, `express`, `jsdom`) через
    `npm install --omit=dev`;
 3. упаковывает каталог в `server.zip`;

@@ -21,12 +21,11 @@ See [docs/GEOMETRY_PIPELINE.md](docs/GEOMETRY_PIPELINE.md) for the current SVG â
 
 ### Nesting engine
 
-The **default** engine is **OpenNest** (`nfp_nest`, a C++ NFP + genetic
-algorithm nester, MIT), vendored under `native/opennest` and wrapped as the
-`opennest` N-API addon (`npm install` builds it next to the Deepnest addon). It
-supports non-rectangular sheets and holes/voids and streams progress plus a live
-best layout. See `native/opennest/UPSTREAM.md` for provenance and `LICENSES.md`
-for its licenses.
+The engine is **OpenNest** (`nfp_nest`, a C++ NFP + genetic algorithm nester,
+MIT), vendored under `native/opennest` and wrapped as the `opennest` N-API addon
+(`npm install` builds it). It supports non-rectangular sheets and holes/voids and
+streams progress plus a live best layout. See `native/opennest/UPSTREAM.md` for
+provenance and `LICENSES.md` for its licenses.
 
 A part's **body is derived from the SVG fill**: filled = material, unfilled =
 hole, with each element's `fill-rule` (and a compound `<path>`'s even-odd)
@@ -37,17 +36,13 @@ single filled region that region is used directly; if it is several regions
 that material, so nothing can overlap the body (multi-region parts are not
 modelled). Merge/weld the shapes in CorelDRAW to keep objects single-region.
 
-The original **Deepnest** engine (JavaScript + the native Minkowski NFP addon in
-`src/`) is still available and streams incremental improvements while it runs;
-select it with `DEEPNEST_ENGINE=deepnest`.
-
 The engine is pluggable: the geometry/Job layers talk to an engine registry
 (`src/geometry/engine-registry.mjs`), not to a specific implementation. A custom
 engine can be installed with `DEEPNEST_ENGINE=<name>` plus
 `DEEPNEST_ENGINE_MODULE=<path-to-module>`, or programmatically with
 `registerEngine()` before the first job. An engine only has to export
 `nest(geometry, renderContext, callback, options)` with the same
-progress/result/abort contract as the built-in ones. See
+progress/result/abort contract as the built-in one. See
 `src/geometry/engine.mjs`.
 
 ### End-user distribution

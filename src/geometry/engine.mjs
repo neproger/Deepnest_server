@@ -10,13 +10,13 @@ import {
  *
  * This module is the stable entry the rest of the application uses
  * (`nestGeometry` / `nestWithRender`). It does not implement an engine itself:
- * it selects a registered engine and delegates. The built-in original Deepnest
- * engine is registered as `"deepnest"` and is the default.
+ * it selects a registered engine and delegates. The built-in OpenNest engine is
+ * registered and is the default.
  *
  * Engine selection (in order):
  *   - `options.engine`
  *   - `DEEPNEST_ENGINE`
- *   - `"deepnest"`
+ *   - `"opennest"`
  *
  * To install a custom engine set `DEEPNEST_ENGINE=myengine` and
  * `DEEPNEST_ENGINE_MODULE=/abs/path/to/my.mjs` (see `engine-registry.mjs`), or
@@ -28,11 +28,10 @@ import {
  */
 
 export { registerEngine, listEngines } from "./engine-registry.mjs";
-export { DEFAULT_ENGINE_CONFIG, resolveEngineConfig } from "./engines/deepnest.mjs";
+export { DEFAULT_ENGINE_CONFIG, resolveEngineConfig } from "./engine-config.mjs";
 
 export const DEFAULT_ENGINE = "opennest";
 
-registerEngine("deepnest", () => import("./engines/deepnest.mjs"));
 // Default engine: OpenNest (C++ NFP/GA, native/opennest). It is only usable once
 // its addon is built; selecting it without the build fails with a clear
 // ENGINE_UNAVAILABLE error.
