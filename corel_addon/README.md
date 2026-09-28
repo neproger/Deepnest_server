@@ -184,7 +184,11 @@ to right.
 Every selected Corel object is sent as one rigid part. Apply always duplicates
 the original Corel object and converts the SVG top-left/downward coordinate
 system back to Corel document coordinates; server-generated SVG is never used
-as output artwork. If an export contains several independent outer roots, the
+as output artwork. An object's **body is derived from the SVG fill** (filled =
+material, unfilled = hole), so nested or overlapping art inside one selected
+object (e.g. concentric rings) is treated as a single rigid body whose material
+may span several regions. Split the object in CorelDRAW when its pieces should
+nest independently. If an export contains several independent outer roots, the
 server uses their convex hull only as conservative collision geometry. The
 preview still draws the original roots.
 

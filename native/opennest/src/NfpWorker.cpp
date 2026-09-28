@@ -327,6 +327,12 @@ std::shared_ptr<NFP> NfpWorker::clone(const NFP& nfp) {
             newnfp->children.push_back(newchild);
         }
     }
+    if (!nfp.regions.empty()) {
+        newnfp->regions.reserve(nfp.regions.size());
+        for (auto& region : nfp.regions) {
+            newnfp->regions.push_back(clone(*region));
+        }
+    }
     return newnfp;
 }
 
@@ -363,6 +369,12 @@ NFP NfpWorker::rotatePolygon(const NFP& polygon, float degrees) {
         for (size_t j = 0; j < polygon.children.size(); j++) {
             auto childRotated = std::make_shared<NFP>(rotatePolygon(*polygon.children[j], degrees));
             rotated.children.push_back(childRotated);
+        }
+    }
+    if (!polygon.regions.empty()) {
+        for (size_t j = 0; j < polygon.regions.size(); j++) {
+            rotated.regions.push_back(
+                std::make_shared<NFP>(rotatePolygon(*polygon.regions[j], degrees)));
         }
     }
     return rotated;
@@ -518,37 +530,52 @@ std::vector<std::shared_ptr<NFP>> NfpWorker::Process2(NFP& A, NFP& B, int type) 
         }
     }
 
-    // Flatten A points
-    std::vector<double> aa;
-    aa.reserve(A.Points.size() * 2);
-    for (auto& pt : A.Points) {
-        aa.push_back(pt.x);
-        aa.push_back(pt.y);
-    }
-
-    // Flatten B points
-    std::vector<double> bb;
-    bb.reserve(B.Points.size() * 2);
-    for (auto& pt : B.Points) {
-        bb.push_back(pt.x);
-        bb.push_back(pt.y);
-    }
-
-    // Flatten hole points
-    std::vector<std::vector<double>> holes;
-    holes.reserve(A.children.size());
-    for (auto& child : A.children) {
-        std::vector<double> holePts;
-        holePts.reserve(child->Points.size() * 2);
-        for (auto& pt : child->Points) {
-            holePts.push_back(pt.x);
-            holePts.push_back(pt.y);
+    // Flatten a polygon tree (outer + direct children) to flat x,y arrays.
+    auto flattenOuter = [](const NFP& p) {
+        std::vector<double> v;
+        v.reserve(p.Points.size() * 2);
+        for (auto& pt : p.Points) {
+            v.push_back(pt.x);
+            v.push_back(pt.y);
         }
-        holes.push_back(std::move(holePts));
+        return v;
+    };
+
+    // Build a Region (outer + own holes) for each material region of A and B. Region 0
+    // is the primary outer; A.regions/B.regions are the rigid extra bodies.
+    auto toRegion = [&](const NFP& p) {
+        MinkowskiConvolution::Region region;
+        region.outer = flattenOuter(p);
+        for (auto& child : p.children) {
+            region.holes.push_back(flattenOuter(*child));
+        }
+        return region;
+    };
+
+    std::vector<MinkowskiConvolution::Region> aregions;
+    aregions.reserve(1 + A.regions.size());
+    aregions.push_back(toRegion(A));
+    for (auto& region : A.regions) {
+        aregions.push_back(toRegion(*region));
     }
 
-    // Compute Minkowski convolution using Clipper2-based implementation
-    auto convResult = MinkowskiConvolution::compute(aa, holes, bb);
+    std::vector<MinkowskiConvolution::Region> bregions;
+    bregions.reserve(1 + B.regions.size());
+    bregions.push_back(toRegion(B));
+    for (auto& region : B.regions) {
+        bregions.push_back(toRegion(*region));
+    }
+
+    auto convResult = MinkowskiConvolution::compute(aregions, bregions);
+
+    if (std::getenv("NFP_DBG_REGIONS") != nullptr) {
+        std::cerr << "[DBG_CONV] Aregs=" << aregions.size() << " Bregs=" << bregions.size()
+                  << " outerPaths=" << convResult.outerPaths.size()
+                  << " holes=" << convResult.holes.size();
+        for (auto& o : convResult.outerPaths) std::cerr << " o" << (o.size() / 2);
+        for (auto& h : convResult.holes) std::cerr << " h" << (h.size() / 2);
+        std::cerr << "\n";
+    }
 
     callCounter++;
 
@@ -622,7 +649,7 @@ std::shared_ptr<NFP> NfpWorker::getOuterNfp(NFP& A, NFP& B, int type, bool insid
     }
 
     // not found in cache
-    if (inside || !A.children.empty()) {
+    if (inside || !A.children.empty() || !A.regions.empty() || !B.regions.empty()) {
         nfp = Process2(A, B, type);
     } else {
         // Outer NFP (no holes) via Clipper2 Minkowski sum. This matches the C# engine's split
@@ -2006,8 +2033,14 @@ void NfpWorker::thenIterate(NfpPair& processed, const std::vector<std::shared_pt
     auto A = getPart(processed.Asource, parts);
     auto B = getPart(processed.Bsource, parts);
 
+    // For a rigid multi-region A the NFP came from the Boost path (Process2), which already
+    // produced the correct holes/pockets for every region. Re-deriving pockets here from the
+    // outer holes alone would ignore nested material (e.g. an inner ring inside a hole) and
+    // punch an allowed pocket straight through it, cancelling that region's forbidden zone.
+    bool multiRegion = A && !A->regions.empty();
+
     std::vector<std::shared_ptr<NFP>> Achildren;
-    if (A && !A->children.empty()) {
+    if (A && !multiRegion) {
         for (size_t j = 0; j < A->children.size(); j++) {
             Achildren.push_back(std::make_shared<NFP>(rotatePolygon(*A->children[j], processed.ARotation)));
         }
@@ -2124,6 +2157,24 @@ std::vector<NfpPair> NfpWorker::pmapDeepNest(std::vector<NfpPair>& pairs) {
 NfpPair NfpWorker::process(NfpPair pair) {
     auto A = rotatePolygon(*pair.A, pair.ARotation);
     auto B = rotatePolygon(*pair.B, pair.BRotation);
+
+    // Rigid multi-region parts: the Clipper Minkowski path here takes single rings, so
+    // route them through the Boost multi-region convolution (Process2) instead.
+    if (!A.regions.empty() || !B.regions.empty()) {
+        auto nfpVec = Process2(A, B, 0);
+        if (std::getenv("NFP_DBG_REGIONS") != nullptr && !nfpVec.empty()) {
+            auto& n = nfpVec.front();
+            std::cerr << "[DBG_PROC] Areg=" << A.regions.size() << " Breg=" << B.regions.size()
+                      << " primary=" << n->length() << " children=" << n->children.size();
+            for (auto& c : n->children)
+                std::cerr << " [v" << c->length() << (c->forbiddenLobe ? "F" : "H") << "]";
+            std::cerr << "\n";
+        }
+        pair.A = nullptr;
+        pair.B = nullptr;
+        pair.nfp = nfpVec.empty() ? nullptr : nfpVec.front();
+        return pair;
+    }
 
     auto Ac = ClipperUtil::ScaleUpPaths(A, 10000000);
     auto Bc = ClipperUtil::ScaleUpPaths(B, 10000000);

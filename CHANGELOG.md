@@ -2,6 +2,15 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 split SVG parts by **fill**: a rigid object (one CorelDRAW object/group)
+           is now ONE part whose body is the union of its filled regions
+           (filled = material, unfilled = hole; compound-path fill-rule/even-odd
+           preserved via `main/svgparser.js`). New `src/geometry/material.mjs`.
+           The OpenNest engine gained **rigid multi-region parts** (per-region
+           Minkowski NFP, one transform), so nested frames (concentric rings)
+           collide correctly instead of collapsing to a convex hull. The Corel
+           form needs no change: one object = one rigid part (split in Corel to
+           separate them).
 2026-09-28 fix OpenNest island nesting: the generation-parallel NFP pre-warm
            cached outer NFPs without their hole "pockets" (it skipped
            thenIterate), so placing a part inside another part's hole silently

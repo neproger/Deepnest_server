@@ -28,6 +28,13 @@ supports non-rectangular sheets and holes/voids and streams progress plus a live
 best layout. See `native/opennest/UPSTREAM.md` for provenance and `LICENSES.md`
 for its licenses.
 
+A part's **body is derived from the SVG fill**: filled = material, unfilled =
+hole, with each element's `fill-rule` (and a compound `<path>`'s even-odd)
+preserved. A rigid object — one CorelDRAW object/group — stays **one part**: its
+material may be several regions (e.g. concentric rings), which the engine nests
+with a single transform via `part.regions` (see `src/geometry/material.mjs`).
+Split the object in CorelDRAW to nest those regions independently.
+
 The original **Deepnest** engine (JavaScript + the native Minkowski NFP addon in
 `src/`) is still available and streams incremental improvements while it runs;
 select it with `DEEPNEST_ENGINE=deepnest`.

@@ -1,7 +1,11 @@
 import path from "path";
+import { createRequire } from "node:module";
 import { DeepNest } from "../../main/deepnest.js";
 import { clonePolygonTree } from "./canonical.mjs";
 import { resolveEngineConfig } from "./engine.mjs";
+import { buildMaterialRegions } from "./material.mjs";
+
+const require = createRequire(import.meta.url);
 
 /**
  * SVG → Canonical Geometry adapter.
@@ -63,7 +67,7 @@ export async function parseSvgInput(svgInput, options = {}) {
   }
   const partGroups = importedGroups.flatMap(({ id, imported, rigid }) =>
     rigid
-      ? [{ id, imported }]
+      ? [{ id, imported, rigid: true }]
       : imported.map((part, rootIndex) => ({
           id: imported.length === 1 ? id : `${id}#${rootIndex + 1}`,
           imported: [part],
@@ -80,18 +84,38 @@ export async function parseSvgInput(svgInput, options = {}) {
     bounds: sheetPart.bounds,
   });
 
-  partGroups.forEach(({ id, imported }) => {
-    const tree = imported.length === 1
-      ? clonePolygonTree(imported[0].polygontree)
-      : convexHullTree(imported.map((part) => part.polygontree));
-    parts.push({
-      id,
-      quantity: 1,
-      polygontree: tree,
-    });
+  partGroups.forEach(({ id, imported, rigid }) => {
+    // Rigid (one CorelDRAW object/group) => one part whose body is the union of its
+    // filled regions. Filled = material, unfilled = holes; nested art (concentric
+    // rings) becomes multiple regions of ONE rigid part instead of a convex hull that
+    // filled the gaps. Non-rigid input keeps the per-root behaviour.
+    const elements = imported.flatMap((part) => part.svgelements ?? []);
+    const material =
+      rigid && elements.length > 0
+        ? buildMaterialRegions(elements, require("../../main/svgparser.js").polygonify)
+        : [];
+
+    let polygontree;
+    let regions;
+    if (material.length > 0) {
+      polygontree = clonePolygonTree(material[0]);
+      regions = material.slice(1).map((region) => clonePolygonTree(region));
+    } else {
+      polygontree =
+        imported.length === 1
+          ? clonePolygonTree(imported[0].polygontree)
+          : convexHullTree(imported.map((part) => part.polygontree));
+    }
+
+    const part = { id, quantity: 1, polygontree };
+    if (regions && regions.length > 0) {
+      part.regions = regions;
+    }
+    parts.push(part);
+
     entries.push({
       svgelements: imported.flatMap((part) => part.svgelements),
-      bounds: polygonBounds(tree),
+      bounds: polygonBounds(polygontree),
     });
     previewParts.push({
       id,

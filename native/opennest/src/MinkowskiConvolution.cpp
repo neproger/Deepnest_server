@@ -151,35 +151,35 @@ std::vector<double> cleanRing(const std::vector<double>& flat) {
 } // namespace
 
 MinkowskiConvolution::Result MinkowskiConvolution::compute(
-    const std::vector<double>& Avec,
-    const std::vector<std::vector<double>>& Aholes,
-    const std::vector<double>& Bvec)
+    const std::vector<Region>& A,
+    const std::vector<Region>& B)
 {
     using namespace boost::polygon;
     Result result;
-    if (Avec.size() < 6 || Bvec.size() < 4) return result;
 
-    polygon_set a, b, c;
-    std::vector<bpolygon> polys;
-    std::vector<bpoint> pts;
+    auto anyUsable = [](const std::vector<Region>& R) {
+        for (const auto& r : R) if (r.outer.size() >= 6) return true;
+        return false;
+    };
+    if (!anyUsable(A) || !anyUsable(B)) return result;
 
     // --- dynamic scaling (matches minkowski.cc to keep parity with minkowski.dll) ---
-    // NOTE: bounds are seeded at 0 like the original, so they always include the
-    // origin. This only affects the chosen integer scale (precision), not the
-    // unscaled result, and reproduces minkowski.dll's behaviour exactly.
-    unsigned int len = static_cast<unsigned int>(Avec.size() / 2);
+    // Bounds are seeded at 0 like the original, so they always include the origin.
     double Amaxx = 0, Aminx = 0, Amaxy = 0, Aminy = 0;
-    for (unsigned int i = 0; i < len; i++) {
-        double x1 = Avec[i * 2], y1 = Avec[i * 2 + 1];
-        Amaxx = (std::max)(Amaxx, x1); Aminx = (std::min)(Aminx, x1);
-        Amaxy = (std::max)(Amaxy, y1); Aminy = (std::min)(Aminy, y1);
+    for (const auto& r : A) {
+        for (size_t i = 0; i + 1 < r.outer.size(); i += 2) {
+            double x = r.outer[i], y = r.outer[i + 1];
+            Amaxx = (std::max)(Amaxx, x); Aminx = (std::min)(Aminx, x);
+            Amaxy = (std::max)(Amaxy, y); Aminy = (std::min)(Aminy, y);
+        }
     }
-    len = static_cast<unsigned int>(Bvec.size() / 2);
     double Bmaxx = 0, Bminx = 0, Bmaxy = 0, Bminy = 0;
-    for (unsigned int i = 0; i < len * 2; i += 2) {
-        double x1 = Bvec[i], y1 = Bvec[i + 1];
-        Bmaxx = (std::max)(Bmaxx, x1); Bminx = (std::min)(Bminx, x1);
-        Bmaxy = (std::max)(Bmaxy, y1); Bminy = (std::min)(Bminy, y1);
+    for (const auto& r : B) {
+        for (size_t i = 0; i + 1 < r.outer.size(); i += 2) {
+            double x = r.outer[i], y = r.outer[i + 1];
+            Bmaxx = (std::max)(Bmaxx, x); Bminx = (std::min)(Bminx, x);
+            Bmaxy = (std::max)(Bmaxy, y); Bminy = (std::min)(Bminy, y);
+        }
     }
     double Cmaxx = Amaxx + Bmaxx, Cminx = Aminx + Bminx;
     double Cmaxy = Amaxy + Bmaxy, Cminy = Aminy + Bminy;
@@ -190,73 +190,94 @@ MinkowskiConvolution::Result MinkowskiConvolution::compute(
     if (maxda < 1) maxda = 1;
     double inputscale = (0.1 * static_cast<double>(maxi)) / maxda;
 
-    // --- polygon A (outer ring minus holes) ---
     // NEAREST rounding (llround), not truncation: static_cast<int> truncates toward zero, a
-    // one-sided error of up to 1/inputscale (~1e-5 model units at a 2000-unit extent) that BIASES
-    // every scaled vertex. On contact-tight exact-NFP layouts that bias surfaced as measurable
-    // micro-penetration/out-of-sheet area (~1e-3 sq units over long contact edges, nfp_bench
-    // oob_area). llround halves the max error and removes the bias.
-    len = static_cast<unsigned int>(Avec.size() / 2);
-    pts.clear();
-    for (unsigned int i = 0; i < len; i++) {
-        int x = static_cast<int>(std::llround(inputscale * Avec[i * 2]));
-        int y = static_cast<int>(std::llround(inputscale * Avec[i * 2 + 1]));
-        pts.push_back(bpoint(x, y));
-    }
-    bpolygon poly;
-    set_points(poly, pts.begin(), pts.end());
-    a += poly;
-
-    for (const auto& hole : Aholes) {
-        if (hole.size() < 6) continue; // need >=3 vertices
-        pts.clear();
-        unsigned int hlen = static_cast<unsigned int>(hole.size() / 2);
-        for (unsigned int j = 0; j < hlen; j++) {
-            int x = static_cast<int>(std::llround(inputscale * hole[j * 2]));
-            int y = static_cast<int>(std::llround(inputscale * hole[j * 2 + 1]));
-            pts.push_back(bpoint(x, y));
+    // one-sided error of up to 1/inputscale that BIASES every scaled vertex.
+    auto scaled = [&](const std::vector<double>& pts, int sign) {
+        std::vector<bpoint> v;
+        v.reserve(pts.size() / 2);
+        for (size_t i = 0; i + 1 < pts.size(); i += 2) {
+            int x = sign * static_cast<int>(std::llround(inputscale * pts[i]));
+            int y = sign * static_cast<int>(std::llround(inputscale * pts[i + 1]));
+            v.push_back(bpoint(x, y));
         }
+        return v;
+    };
+
+    // B reference shift = B region 0's first vertex.
+    double xshift = 0.0, yshift = 0.0;
+    for (const auto& r : B) {
+        if (r.outer.size() >= 2) { xshift = r.outer[0]; yshift = r.outer[1]; break; }
+    }
+
+    // Build a polygon_set for every B region (negated), once.
+    std::vector<polygon_set> bsets;
+    bsets.reserve(B.size());
+    for (const auto& rb : B) {
+        if (rb.outer.size() < 6) continue;
+        polygon_set bset;
+        bpolygon poly;
+        auto pts = scaled(rb.outer, -1);
         set_points(poly, pts.begin(), pts.end());
-        a -= poly;
-    }
-
-    // --- polygon B (negated), referenced to its first vertex ---
-    pts.clear();
-    len = static_cast<unsigned int>(Bvec.size() / 2);
-    double xshift = (Bvec.size() >= 2) ? Bvec[0] : 0.0;
-    double yshift = (Bvec.size() >= 2) ? Bvec[1] : 0.0;
-    for (unsigned int i = 0; i < len; i++) {
-        int x = -static_cast<int>(std::llround(inputscale * Bvec[i * 2]));
-        int y = -static_cast<int>(std::llround(inputscale * Bvec[i * 2 + 1]));
-        pts.push_back(bpoint(x, y));
-    }
-    set_points(poly, pts.begin(), pts.end());
-    b += poly;
-
-    // --- convolve and read back ---
-    convolve_two_polygon_sets(c, a, b);
-    c.get(polys);
-
-    for (std::size_t i = 0; i < polys.size(); ++i) {
-        std::vector<double> pointlist;
-        for (polygon_traits<bpolygon>::iterator_type itr = polys[i].begin(); itr != polys[i].end(); ++itr) {
-            double x1 = static_cast<double>((*itr).get(HORIZONTAL)) / inputscale + xshift;
-            double y1 = static_cast<double>((*itr).get(VERTICAL)) / inputscale + yshift;
-            pointlist.push_back(x1);
-            pointlist.push_back(y1);
+        bset += poly;
+        for (const auto& h : rb.holes) {
+            if (h.size() < 6) continue;
+            auto hp = scaled(h, -1);
+            set_points(poly, hp.begin(), hp.end());
+            bset -= poly;
         }
-        result.outerPaths.push_back(cleanRing(pointlist));
+        bsets.push_back(std::move(bset));
+    }
+    if (bsets.empty()) return result;
 
-        for (polygon_with_holes_traits<bpolygon>::iterator_holes_type itrh = begin_holes(polys[i]);
-             itrh != end_holes(polys[i]); ++itrh) {
-            std::vector<double> child;
-            for (polygon_traits<bpolygon>::iterator_type itr2 = (*itrh).begin(); itr2 != (*itrh).end(); ++itr2) {
-                double x1 = static_cast<double>((*itr2).get(HORIZONTAL)) / inputscale + xshift;
-                double y1 = static_cast<double>((*itr2).get(VERTICAL)) / inputscale + yshift;
-                child.push_back(x1);
-                child.push_back(y1);
+    // Convolve per (A region, B region) and append every resulting loop WITHOUT
+    // unioning them in Boost. Boost's polygon_set collapses a ring nested inside
+    // another ring's hole; keeping the loops separate lets Process2 classify them
+    // (primary outer + forbidden lobes + holes) and the downstream NonZero winding
+    // reconstruct the nested forbidden zone exactly.
+    auto appendPolys = [&](std::vector<bpolygon>& polys) {
+        for (std::size_t i = 0; i < polys.size(); ++i) {
+            std::vector<double> pointlist;
+            for (polygon_traits<bpolygon>::iterator_type itr = polys[i].begin(); itr != polys[i].end(); ++itr) {
+                double x1 = static_cast<double>((*itr).get(HORIZONTAL)) / inputscale + xshift;
+                double y1 = static_cast<double>((*itr).get(VERTICAL)) / inputscale + yshift;
+                pointlist.push_back(x1);
+                pointlist.push_back(y1);
             }
-            result.holes.push_back(cleanRing(child));
+            result.outerPaths.push_back(cleanRing(pointlist));
+
+            for (polygon_with_holes_traits<bpolygon>::iterator_holes_type itrh = begin_holes(polys[i]);
+                 itrh != end_holes(polys[i]); ++itrh) {
+                std::vector<double> child;
+                for (polygon_traits<bpolygon>::iterator_type itr2 = (*itrh).begin(); itr2 != (*itrh).end(); ++itr2) {
+                    double x1 = static_cast<double>((*itr2).get(HORIZONTAL)) / inputscale + xshift;
+                    double y1 = static_cast<double>((*itr2).get(VERTICAL)) / inputscale + yshift;
+                    child.push_back(x1);
+                    child.push_back(y1);
+                }
+                result.holes.push_back(cleanRing(child));
+            }
+        }
+    };
+
+    for (const auto& ra : A) {
+        if (ra.outer.size() < 6) continue;
+        polygon_set aset;
+        bpolygon poly;
+        auto pts = scaled(ra.outer, 1);
+        set_points(poly, pts.begin(), pts.end());
+        aset += poly;
+        for (const auto& h : ra.holes) {
+            if (h.size() < 6) continue;
+            auto hp = scaled(h, 1);
+            set_points(poly, hp.begin(), hp.end());
+            aset -= poly;
+        }
+        for (auto& bset : bsets) {
+            polygon_set tmp;
+            convolve_two_polygon_sets(tmp, aset, bset);
+            std::vector<bpolygon> polys;
+            tmp.get(polys);
+            appendPolys(polys);
         }
     }
 

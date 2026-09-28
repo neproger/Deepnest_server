@@ -104,6 +104,14 @@ struct NestRequest {
   std::vector<int32_t> partHoleVertexCounts;
   std::vector<double> partHoleXY;
 
+  // Rigid multi-region parts (extra regions beyond the primary outer+holes).
+  std::vector<int32_t> partRegionCounts;
+  std::vector<int32_t> partRegionVertexCounts;
+  std::vector<double> partRegionXY;
+  std::vector<int32_t> partRegionHoleCounts;
+  std::vector<int32_t> partRegionHoleVertexCounts;
+  std::vector<double> partRegionHoleXY;
+
   std::vector<int32_t> sheetVertexCounts;
   std::vector<double> sheetXY;
   std::vector<int32_t> sheetHoleCounts;
@@ -148,6 +156,10 @@ class NestWorker : public Napi::AsyncWorker {
         request_.hasPartRotations ? IntData(request_.partRotations) : nullptr,
         IntData(request_.partHoleCounts), IntData(request_.partHoleVertexCounts),
         DoubleData(request_.partHoleXY),
+        IntData(request_.partRegionCounts), IntData(request_.partRegionVertexCounts),
+        DoubleData(request_.partRegionXY),
+        IntData(request_.partRegionHoleCounts), IntData(request_.partRegionHoleVertexCounts),
+        DoubleData(request_.partRegionHoleXY),
         static_cast<int>(request_.sheetVertexCounts.size()),
         IntData(request_.sheetVertexCounts), DoubleData(request_.sheetXY),
         IntData(request_.sheetHoleCounts), IntData(request_.sheetHoleVertexCounts),
@@ -258,6 +270,16 @@ Napi::Value Nest(const Napi::CallbackInfo& info) {
     request.partHoleVertexCounts =
         ReadIntArray(input.Get("partHoleVertexCounts"));
     request.partHoleXY = ReadDoubleArray(input.Get("partHoleXY"));
+
+    request.partRegionCounts = ReadIntArray(input.Get("partRegionCounts"));
+    request.partRegionVertexCounts =
+        ReadIntArray(input.Get("partRegionVertexCounts"));
+    request.partRegionXY = ReadDoubleArray(input.Get("partRegionXY"));
+    request.partRegionHoleCounts =
+        ReadIntArray(input.Get("partRegionHoleCounts"));
+    request.partRegionHoleVertexCounts =
+        ReadIntArray(input.Get("partRegionHoleVertexCounts"));
+    request.partRegionHoleXY = ReadDoubleArray(input.Get("partRegionHoleXY"));
 
     request.sheetVertexCounts = ReadIntArray(input.Get("sheetVertexCounts"));
     request.sheetXY = ReadDoubleArray(input.Get("sheetXY"));

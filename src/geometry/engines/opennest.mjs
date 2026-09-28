@@ -102,6 +102,48 @@ function flatten(polys) {
   };
 }
 
+/**
+ * Extra rigid material regions per part (regions[1..]) for the native multi-region
+ * part support. Region 0 stays in the regular part arrays above.
+ */
+function flattenRegions(polys) {
+  const counts = [];
+  const vertexCounts = [];
+  const xy = [];
+  const holeCounts = [];
+  const holeVertexCounts = [];
+  const holeXY = [];
+
+  for (const poly of polys) {
+    const regions = poly.regions ?? [];
+    counts.push(regions.length);
+    for (const region of regions) {
+      const outer = region.outer;
+      vertexCounts.push(outer.length);
+      for (const point of outer) {
+        xy.push(point.x, point.y);
+      }
+      const holes = region.holes ?? [];
+      holeCounts.push(holes.length);
+      for (const hole of holes) {
+        holeVertexCounts.push(hole.length);
+        for (const point of hole) {
+          holeXY.push(point.x, point.y);
+        }
+      }
+    }
+  }
+
+  return {
+    counts: Int32Array.from(counts),
+    vertexCounts: Int32Array.from(vertexCounts),
+    xy: Float64Array.from(xy),
+    holeCounts: Int32Array.from(holeCounts),
+    holeVertexCounts: Int32Array.from(holeVertexCounts),
+    holeXY: Float64Array.from(holeXY),
+  };
+}
+
 function buildContext(normalized) {
   const partIds = normalized.parts.map((part) => part.id);
   const quantities = normalized.parts.map((part) =>
@@ -111,6 +153,10 @@ function buildContext(normalized) {
   const partPolys = normalized.parts.map((part) => ({
     outer: part.polygontree,
     holes: part.polygontree.children ?? [],
+    regions: (part.regions ?? []).map((region) => ({
+      outer: region,
+      holes: region.children ?? [],
+    })),
   }));
 
   const sheetPolys = [];
@@ -274,6 +320,7 @@ export async function nest(geometry, renderContext, callback, options = {}) {
 
   const ctx = buildContext(normalized);
   const partFlat = flatten(ctx.partPolys);
+  const regionFlat = flattenRegions(ctx.partPolys);
   const sheetFlat = flatten(ctx.sheetPolys);
   const request = {
     partVertexCounts: partFlat.vertexCounts,
@@ -282,6 +329,12 @@ export async function nest(geometry, renderContext, callback, options = {}) {
     partHoleCounts: partFlat.holeCounts,
     partHoleVertexCounts: partFlat.holeVertexCounts,
     partHoleXY: partFlat.holeXY,
+    partRegionCounts: regionFlat.counts,
+    partRegionVertexCounts: regionFlat.vertexCounts,
+    partRegionXY: regionFlat.xy,
+    partRegionHoleCounts: regionFlat.holeCounts,
+    partRegionHoleVertexCounts: regionFlat.holeVertexCounts,
+    partRegionHoleXY: regionFlat.holeXY,
     sheetVertexCounts: sheetFlat.vertexCounts,
     sheetXY: sheetFlat.xy,
     sheetHoleCounts: sheetFlat.holeCounts,

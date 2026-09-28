@@ -200,11 +200,62 @@
 		return this.svgRoot;
 	}
 	
+	// Resolve <style> class rules into per-element fill / fill-rule attributes.
+	// CorelDRAW exports the paint as CSS classes (.fil0 {fill:#...;fill-rule:...}), which the
+	// material pass needs as plain attributes; the <style> element itself is removed by filter().
+	SvgParser.prototype.resolveStyles = function(root){
+		var styleMap = {};
+		var styles = root.getElementsByTagName ? root.getElementsByTagName('style') : [];
+		for(var i=0; i<styles.length; i++){
+			var text = styles[i].textContent || '';
+			var re = /\.([A-Za-z0-9_-]+)\s*\{([^}]*)\}/g;
+			var m;
+			while((m = re.exec(text)) !== null){
+				var body = m[2];
+				var fill = /fill\s*:\s*([^;]+)/i.exec(body);
+				var rule = /fill-rule\s*:\s*([^;]+)/i.exec(body);
+				styleMap[m[1]] = {
+					fill: fill ? fill[1].trim() : undefined,
+					rule: rule ? rule[1].trim() : undefined
+				};
+			}
+		}
+
+		var rootStyle = root.getAttribute('style') || '';
+		var rootRuleMatch = /fill-rule\s*:\s*(evenodd|nonzero)/i.exec(rootStyle);
+		var rootRule = rootRuleMatch ? rootRuleMatch[1].toLowerCase() : null;
+
+		var apply = function(el){
+			var cls = (el.getAttribute && el.getAttribute('class') || '').trim();
+			var info = styleMap[cls];
+			if(info){
+				if(info.fill && !el.getAttribute('fill')){
+					el.setAttribute('fill', info.fill);
+				}
+				if(info.rule && !el.getAttribute('fill-rule')){
+					el.setAttribute('fill-rule', info.rule);
+				}
+			}
+			if(rootRule && !el.getAttribute('fill-rule')){
+				el.setAttribute('fill-rule', rootRule);
+			}
+			var children = el.children || [];
+			for(var i=0; i<children.length; i++){
+				apply(children[i]);
+			}
+		};
+		apply(root);
+	};
+
 	// use the utility functions in this class to prepare the svg for CAD-CAM/nest related operations
 	SvgParser.prototype.cleanInput = function(dxfFlag){
 		
 		// apply any transformations, so that all path positions etc will be in the same coordinate space
 		this.applyTransform(this.svgRoot, '', false, dxfFlag);
+
+		// Resolve <style> class rules (CorelDRAW puts fill/fill-rule in CSS classes) into
+		// per-element attributes, so the material pass can tell the part body from holes.
+		this.resolveStyles(this.svgRoot);
 
 		// remove any g elements and bring all elements to the top level
 		this.flatten(this.svgRoot);
@@ -1332,7 +1383,13 @@
 		if(path?.tagName != 'path' || !path.parentElement){
 			return null;
 		}
-				
+
+		// Subpaths of one compound <path> must stay grouped: their even-odd/nonzero
+		// fill together defines one filled region (e.g. a ring). Tag every clone with
+		// the same group id so the material pass can rebuild the fill per source path.
+		const groupId = 'dng' + (SvgParser.prototype._splitGroupSeq =
+			(SvgParser.prototype._splitGroupSeq || 0) + 1);
+
 		const seglist = path.pathSegList || (path.pathSegList = new window.SVGPathSegList(path));
 		const indices = [];
 
@@ -1367,6 +1424,7 @@
 			const p = path.cloneNode();
 			Object.setPrototypeOf(p, window.SVGPathElement.prototype);
 			p.setAttribute('d', '');
+			p.setAttribute('data-deepnest-group', groupId);
 			const pathSegList = p.pathSegList || (p.pathSegList = new window.SVGPathSegList(p));
 			const seg = window.SVGPathElement.prototype.createSVGPathSegMovetoAbs.call(this, from.x, from.y);
 			pathSegList.appendItem(seg)

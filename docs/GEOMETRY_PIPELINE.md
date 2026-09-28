@@ -6,6 +6,12 @@
 > the pipeline. Findings come from reading `main/svgparser.js`,
 > `main/deepnest.js`, `main/background.js`, `main/processPair.mjs` and from a
 > runtime probe (see "Runtime evidence" below).
+>
+> **Update (2026-09-28):** a part body is now derived from the SVG **fill**
+> (`src/geometry/material.mjs`, `src/geometry/svg-adapter.mjs`): rigid input
+> (one CorelDRAW object/group) becomes ONE part with `part.regions` (its material
+> may be several nested regions, e.g. concentric rings). The containment
+> `toTree()` described below is still used for non-rigid input.
 
 ## Current Flow
 
