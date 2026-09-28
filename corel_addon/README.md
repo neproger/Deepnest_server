@@ -132,7 +132,8 @@ release notes.
 The compact row contains:
 
 - sheet width and height in millimeters;
-- spacing in millimeters;
+- spacing in millimeters (minimum gap between parts);
+- edge offset in millimeters (minimum gap from the sheet edge; `sheetSpacing`);
 - rotation variant count (`4` means 0°, 90°, 180°, and 270°).
 
 The expandable settings row contains the native OpenNest (`nfp_nest`) engine
@@ -150,6 +151,13 @@ settings:
 - **Tolerance, mm** — curve flattening tolerance (`curveTolerance`);
 - **Limit, sec** — optional automatic stop (`timeLimitSeconds`; `0` = run until
   Stop).
+
+The engine derives the edge gap from two inputs: the **edge offset** above, and
+a conservative safety offset it applies around every simplified part and sheet.
+That safety offset is `8 × Tolerance` for non-rectangular parts (e.g. `Tolerance
+= 1` mm adds ~8 mm to the visible edge gap), while simple rectangular parts use a
+fast path with no such offset. To get a tight edge, keep `Tolerance` small
+(e.g. `0.1`–`0.3`) and set the edge offset explicitly.
 
 Settings are stored in:
 

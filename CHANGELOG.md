@@ -2,6 +2,9 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 Corel form: add an explicit sheet-edge offset (`sheetSpacing`). The
+           visible edge gap on non-rectangular parts is the sum of that offset
+           and a conservative engine margin, `8 × curveTolerance`.
 2026-09-28 fix Corel: parts exported as `<rect>` at the origin were silently
            dropped by a leftover OnShape hack in `main/svgparser.js`; removed it,
            so rectangular parts nest again. The Corel addon now exposes the

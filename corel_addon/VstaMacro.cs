@@ -90,6 +90,7 @@ namespace CorelDeepnest.Runtime
             public double SheetWidth;
             public double SheetHeight;
             public double Spacing;
+            public double SheetSpacing;
             public int Rotations;
             public string PlacementType;
             public int PopulationSize;
@@ -642,6 +643,7 @@ namespace CorelDeepnest.Runtime
             return new Dictionary<string, object>
             {
                 { "spacing", options.Spacing },
+                { "sheetSpacing", options.SheetSpacing },
                 { "rotations", options.Rotations },
                 { "placementType", options.PlacementType },
                 { "populationSize", options.PopulationSize },
@@ -904,6 +906,7 @@ namespace CorelDeepnest.Runtime
             private readonly NumericUpDown width = NumberInput(1000);
             private readonly NumericUpDown height = NumberInput(500);
             private readonly NumericUpDown spacing = NumberInput(0);
+            private readonly NumericUpDown sheetSpacing = NumberInput(0);
             private readonly NumericUpDown rotations = NumberInput(4, 0);
             private readonly ComboBox placementType = new ComboBox();
             private readonly NumericUpDown populationSize = NumberInput(10, 0);
@@ -939,6 +942,9 @@ namespace CorelDeepnest.Runtime
                 height.Minimum = 0.01M;
                 rotations.Minimum = 1;
                 rotations.Maximum = 3600;
+                sheetSpacing.Minimum = 0;
+                sheetSpacing.Maximum = 10000;
+                sheetSpacing.Increment = 0.5M;
                 populationSize.Minimum = 1;
                 populationSize.Maximum = 100000;
                 mutationRate.Minimum = 0;
@@ -982,6 +988,7 @@ namespace CorelDeepnest.Runtime
                 AddField(fields, "Ширина, мм", width);
                 AddField(fields, "Высота, мм", height);
                 AddField(fields, "Зазор, мм", spacing);
+                AddField(fields, "Отступ от края, мм", sheetSpacing);
                 AddField(fields, "Вариантов поворота", rotations);
 
                 var advancedFields = new FlowLayoutPanel
@@ -1009,6 +1016,8 @@ namespace CorelDeepnest.Runtime
                 help.SetToolTip(height, "Высота листа в миллиметрах.");
                 help.SetToolTip(spacing,
                     "Минимальный зазор между деталями, мм (min separation движка).");
+                help.SetToolTip(sheetSpacing,
+                    "Отступ деталей от края листа, мм (sheetSpacing движка). 0 — вплотную; для сложных деталей фактический отступ больше примерно на 8×«Точность».");
                 help.SetToolTip(rotations,
                     "Число равномерных вариантов поворота, а не градусы. 4 = 0, 90, 180 и 270.");
                 help.SetToolTip(placementType,
@@ -1020,7 +1029,7 @@ namespace CorelDeepnest.Runtime
                 help.SetToolTip(generations,
                     "Поколений за один прогон. Меньше — чаще перезапуск с новым зерном, результат уточняется постепенно.");
                 help.SetToolTip(curveTolerance,
-                    "Точность сглаживания входной геометрии, мм.");
+                    "Точность сглаживания входной геометрии, мм. Движок также отступает сложные детали от края листа примерно на 8×это значение (на прямоугольных деталях не влияет).");
                 help.SetToolTip(timeLimitSeconds,
                     "0 — работать до кнопки «Стоп»; положительное значение — автостоп, сек.");
                 help.SetToolTip(allRotations,
@@ -1318,6 +1327,7 @@ namespace CorelDeepnest.Runtime
                     SheetWidth = Convert.ToDouble(width.Value),
                     SheetHeight = Convert.ToDouble(height.Value),
                     Spacing = Convert.ToDouble(spacing.Value),
+                    SheetSpacing = Convert.ToDouble(sheetSpacing.Value),
                     Rotations = Convert.ToInt32(rotations.Value),
                     PlacementType = Convert.ToString(placementType.SelectedItem),
                     PopulationSize = Convert.ToInt32(populationSize.Value),
@@ -1347,6 +1357,7 @@ namespace CorelDeepnest.Runtime
                     SetNumber(values, "sheetWidth", width);
                     SetNumber(values, "sheetHeight", height);
                     SetNumber(values, "spacing", spacing);
+                    SetNumber(values, "sheetSpacing", sheetSpacing);
                     SetNumber(values, "rotations", rotations);
                     SetNumber(values, "populationSize", populationSize);
                     SetNumber(values, "mutationRate", mutationRate);
@@ -1378,6 +1389,7 @@ namespace CorelDeepnest.Runtime
                         { "sheetWidth", options.SheetWidth },
                         { "sheetHeight", options.SheetHeight },
                         { "spacing", options.Spacing },
+                        { "sheetSpacing", options.SheetSpacing },
                         { "rotations", options.Rotations },
                         { "placementType", options.PlacementType },
                         { "populationSize", options.PopulationSize },
