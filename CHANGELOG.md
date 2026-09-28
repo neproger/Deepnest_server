@@ -2,6 +2,11 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 remove the optional ironnest (Rust) engine, its vendored source, the
+           Node-API bridge and the adapter. Deepnest is the only shipping engine.
+           The pluggable-engine mechanism is kept: engines are selected/installed
+           through the registry (`DEEPNEST_ENGINE`, `DEEPNEST_ENGINE_MODULE`,
+           `registerEngine`).
 2026-09-27 restore the original Deepnest engine (JavaScript + native Minkowski NFP
            addon) as the default; keep ironnest as an optional engine behind
            `DEEPNEST_ENGINE=ironnest`; the WASM core stays removed.

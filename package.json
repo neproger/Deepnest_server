@@ -13,8 +13,7 @@
     "test:core": "node --test tests/core/",
     "test:server": "node --test tests/server/",
     "configure": "node-gyp configure --release",
-    "clean": "rmdir /s /q build dist >nul 2>&1|echo . >nul",
-    "engine:build": "npm --prefix native/ironnest-napi install && npm --prefix native/ironnest-napi run build"
+    "clean": "rmdir /s /q build dist >nul 2>&1|echo . >nul"
   },
   "repository": "https://github.com/deepnest-io/Deepnest",
   "keywords": [

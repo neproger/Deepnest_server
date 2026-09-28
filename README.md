@@ -25,10 +25,14 @@ The nesting engine is the original **Deepnest** engine (JavaScript + the native
 Minkowski NFP addon in `src/`, built by `npm install`). It is the default and
 streams incremental improvements while it runs.
 
-An optional alternative engine, [ironnest](docs/IRONNEST_ENGINE.md) (Rust,
-native Node-API addon), can be selected with `DEEPNEST_ENGINE=ironnest` after
-building it with `npm run engine:build`. It is slower to converge on
-over-subscribed jobs and does not model holes inside a part.
+The engine is pluggable: the geometry/Job layers talk to an engine registry
+(`src/geometry/engine-registry.mjs`), not to a specific implementation. A custom
+engine can be installed with `DEEPNEST_ENGINE=<name>` plus
+`DEEPNEST_ENGINE_MODULE=<path-to-module>`, or programmatically with
+`registerEngine()` before the first job. An engine only has to export
+`nest(geometry, renderContext, callback, options)` with the same
+progress/result/abort contract as the built-in one. See
+`src/geometry/engine.mjs`.
 
 ### End-user distribution
 

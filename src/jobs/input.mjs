@@ -16,10 +16,6 @@ import { parseSvgInput } from "../geometry/svg-adapter.mjs";
 const MAX_SVG_BYTES = 10 * 1024 * 1024;
 const RESERVED_CONFIG_KEYS = ["bin", "progressCallback", "timeout"];
 
-// ironnest-native engine options accepted through `config`.
-const ENGINE_STRATEGIES = new Set(["sampling", "nfp"]);
-const ENGINE_EFFORTS = new Set(["full", "fast", "max"]);
-
 export function httpError(status, code, message) {
   const error = new Error(message);
   error.status = status;
@@ -66,7 +62,7 @@ function validateConfig(config) {
       );
     }
   }
-  validateNativeConfig(config || {});
+  validateEngineConfig(config || {});
   return config || {};
 }
 
@@ -90,28 +86,12 @@ function requireNumber(config, key, { min, exclusiveMin, integer } = {}) {
 }
 
 /**
- * Validate the ironnest-native engine options. Unknown keys are ignored (the
- * engine does not consume them), but the recognized ones are checked so a bad
- * value produces a 400 instead of a failed job.
+ * Validate the engine options recognized by the default Deepnest engine.
+ * Unknown keys are ignored (the engine passes them through), but the values the
+ * engine actually consumes are checked so a bad value produces a 400 instead of
+ * a failed job.
  */
-function validateNativeConfig(config) {
-  if (config.strategy !== undefined && !ENGINE_STRATEGIES.has(config.strategy)) {
-    throw httpError(
-      400,
-      "INVALID_CONFIG",
-      'config.strategy must be "sampling" or "nfp"'
-    );
-  }
-  if (
-    config.separationEffort !== undefined &&
-    !ENGINE_EFFORTS.has(config.separationEffort)
-  ) {
-    throw httpError(
-      400,
-      "INVALID_CONFIG",
-      'config.separationEffort must be "full", "fast" or "max"'
-    );
-  }
+function validateEngineConfig(config) {
   if (config.rotations !== undefined) {
     if (Array.isArray(config.rotations)) {
       if (
@@ -133,10 +113,6 @@ function validateNativeConfig(config) {
   requireNumber(config, "spacing", { min: 0 });
   requireNumber(config, "curveTolerance", { exclusiveMin: 0 });
   requireNumber(config, "scale", { exclusiveMin: 0 });
-  requireNumber(config, "budget", { min: 1, integer: true });
-  requireNumber(config, "restarts", { min: 1, integer: true });
-  requireNumber(config, "columnWeight", { min: 1, integer: true });
-  requireNumber(config, "seed", { min: 0, integer: true });
 }
 
 function validateExecution(execution) {

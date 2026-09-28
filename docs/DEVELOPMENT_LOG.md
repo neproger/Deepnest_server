@@ -1675,6 +1675,60 @@ Corel запускает UI, а UI сам поднимает сервер из �
 `..\server` от аддона не указывает на исходную папку. Встраивание сервера в
 пакет убирает выбор папки полностью: юзер только загружает аддон.
 
+---
+
+## 2026-09-28 — Удаление ironnest, сохранение сменного движка
+
+### Причина
+
+ironnest не подошёл для продакшена: он не моделирует длину/лист в том виде, как
+нужно, и на переполненных задачах сходится медленнее. Дефолтный движок — строго
+Deepnest. Опциональный Rust-движок решили выпилить, но **сохранить саму
+механику сменного движка**: должна остаться возможность подключить другой
+движок без правок Job/HTTP/geometry слоёв.
+
+### Что сделано
+
+- **Registry.** Новый `src/geometry/engine-registry.mjs`:
+  `registerEngine(name, loader)`, `resolveEngine(name)`, `listEngines()`,
+  `hasEngine(name)`. Ошибка неизвестного движка — `UNKNOWN_ENGINE`.
+- **Вынесен дефолтный движок.** `src/geometry/engines/deepnest.mjs` — прежняя
+  реализация Deepnest (`DEFAULT_ENGINE_CONFIG`, `resolveEngineConfig`, `nest`);
+  `nest(geometry, renderContext, callback, options)` — контракт движка.
+- **Фасад.** `src/geometry/engine.mjs` теперь только выбирает и делегирует:
+  `options.engine` → `DEEPNEST_ENGINE` → `"deepnest"`. Публичные
+  `nestGeometry`/`nestWithRender` сохранены; ре-экспортированы
+  `registerEngine`, `listEngines`, `DEFAULT_ENGINE_CONFIG`, `resolveEngineConfig`.
+- **Внешний движок.** `DEEPNEST_ENGINE=<name>` + `DEEPNEST_ENGINE_MODULE=<path>`:
+  модуль грузится динамически и предоставляет `nest()` (named или default) либо
+  саморегистрируется через `registerEngine`.
+- **Удалено:** `src/geometry/engine-ironnest/`, весь `native/` (vendor ironnest
+  + `native/ironnest-napi`), `docs/IRONNEST_ENGINE.md`,
+  `tests/core/ironnest-engine.test.mjs`, скрипт `engine:build`, ironnest-поля в
+  `index.d.ts`, ironnest-строки в `.gitignore`/`.prettierignore`/`LICENSES.md`.
+- **Конфиг.** `src/jobs/input.mjs`: ironnest-only проверки (`strategy`,
+  `separationEffort`, `budget`, `restarts`, `columnWeight`, `seed`) убраны;
+  `validateNativeConfig` заменён на `validateEngineConfig` (generic:
+  `rotations`, `spacing`, `curveTolerance`, `scale`). Неизвестные ключи
+  по-прежнему проходят насквозь.
+
+### Тесты
+
+- Новый `tests/core/engine-registry.test.mjs` + фикстура
+  `tests/fixtures/external-engine.mjs`: дефолтный `deepnest` зарегистрирован;
+  выбор через `options.engine`; выбор через `DEEPNEST_ENGINE`; загрузка внешнего
+  движка через `DEEPNEST_ENGINE_MODULE`; `UNKNOWN_ENGINE` для неизвестного.
+- `tests/server/jobs.test.mjs`: тест `ironnest-native engine config` заменён на
+  `validates engine config and accepts Deepnest options`.
+- `npm test` — полностью зелёный (core + server + native addon).
+
+### Не менялось
+
+Nesting-алгоритм, Job/HTTP API, canonical geometry, SVG adapter/renderer,
+Corel-дистрибутив. `DEEPNEST_ENGINE` без установленного модуля с
+незарегистрированным именем теперь даёт явную `UNKNOWN_ENGINE` (раньше
+`ironnest` был встроен).
+
 
 
 

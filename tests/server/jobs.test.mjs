@@ -980,23 +980,18 @@ test("geometry input: auto sheet mode expands to as many instances as needed", a
   await deleteJob(id);
 });
 
-test("validates and accepts ironnest-native engine config", async () => {
-  const badStrategy = await createJob(
-    geometryBody([geoPart("g")], { config: { strategy: "nope" } })
+test("validates engine config and accepts Deepnest options", async () => {
+  const badSpacing = await createJob(
+    geometryBody([geoPart("g")], { config: { spacing: -1 } })
   );
-  assert.equal(badStrategy.status, 400);
-  assert.equal(badStrategy.json.error.code, "INVALID_CONFIG");
+  assert.equal(badSpacing.status, 400);
+  assert.equal(badSpacing.json.error.code, "INVALID_CONFIG");
 
-  const badEffort = await createJob(
-    geometryBody([geoPart("g")], { config: { separationEffort: "off" } })
+  const badTolerance = await createJob(
+    geometryBody([geoPart("g")], { config: { curveTolerance: 0 } })
   );
-  assert.equal(badEffort.status, 400);
-  assert.equal(badEffort.json.error.code, "INVALID_CONFIG");
-
-  const badBudget = await createJob(
-    geometryBody([geoPart("g")], { config: { budget: 0 } })
-  );
-  assert.equal(badBudget.status, 400);
+  assert.equal(badTolerance.status, 400);
+  assert.equal(badTolerance.json.error.code, "INVALID_CONFIG");
 
   const badRotations = await createJob(
     geometryBody([geoPart("g")], { config: { rotations: 0 } })
@@ -1007,11 +1002,11 @@ test("validates and accepts ironnest-native engine config", async () => {
     geometryBody([geoPart("g")], {
       config: {
         spacing: 0,
-        strategy: "sampling",
-        separationEffort: "fast",
-        budget: 200,
-        restarts: 1,
-        columnWeight: 3,
+        rotations: 4,
+        populationSize: 4,
+        mutationRate: 1,
+        curveTolerance: 0.5,
+        placementType: "box",
       },
     })
   );
@@ -1020,7 +1015,7 @@ test("validates and accepts ironnest-native engine config", async () => {
   const result = await waitFor(async () => {
     const res = await getJson(`/api/v1/jobs/${id}/result`);
     return res.status === 200 ? res.json : null;
-  }, { message: "no result for native config" });
+  }, { message: "no result for custom engine config" });
   assert.equal(result.placements.length, 1);
 
   await stopJob(id);

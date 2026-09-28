@@ -1,66 +1,57 @@
-import { Worker } from "node:worker_threads";
-import { DeepNest } from "../../main/deepnest.js";
-import { normalizeGeometry, clonePolygonTree } from "./canonical.mjs";
+import { pathToFileURL } from "node:url";
+import {
+  registerEngine,
+  hasEngine,
+  resolveEngine,
+} from "./engine-registry.mjs";
 
 /**
- * Canonical engine entry point.
+ * Canonical engine boundary.
  *
- * Takes Canonical Geometry and runs it through the existing Deepnest engine
- * (worker_threads / NFP / native addon / GA), with the same
- * progress/result/abort semantics as the SVG path. It knows nothing about SVG,
- * DOM or HTTP.
+ * This module is the stable entry the rest of the application uses
+ * (`nestGeometry` / `nestWithRender`). It does not implement an engine itself:
+ * it selects a registered engine and delegates. The built-in original Deepnest
+ * engine is registered as `"deepnest"` and is the default.
+ *
+ * Engine selection (in order):
+ *   - `options.engine`
+ *   - `DEEPNEST_ENGINE`
+ *   - `"deepnest"`
+ *
+ * To install a custom engine set `DEEPNEST_ENGINE=myengine` and
+ * `DEEPNEST_ENGINE_MODULE=/abs/path/to/my.mjs` (see `engine-registry.mjs`), or
+ * call `registerEngine()` before the first job.
  *
  * This module must stay importable without DOM globals. It intentionally does
  * not import `main/nestingToSVG.mjs` (the SVG renderer); rendering is injected
- * by the caller via `nestWithRender`.
+ * by the caller via `renderContext`.
  */
 
-export const DEFAULT_ENGINE_CONFIG = {
-  curveTolerance: 0.72,
-  clipperScale: 10000000,
-  rotations: 4,
-  threads: 4,
-  populationSize: 10,
-  mutationRate: 10,
-  placementType: "gravity",
-  mergeLines: true,
-  timeRatio: 0.5,
-  simplify: false,
-  dxfImportScale: 1,
-  dxfExportScale: 72,
-  endpointTolerance: 0.36,
-  conversionServer: "http://convert.deepnest.io",
-};
+export { registerEngine, listEngines } from "./engine-registry.mjs";
+export { DEFAULT_ENGINE_CONFIG, resolveEngineConfig } from "./engines/deepnest.mjs";
 
-/**
- * Resolve engine options into a DeepNest config.
- *
- * `spacing` is expected in canonical coordinate units. The SVG adapter is
- * responsible for converting SVG units before calling the engine.
- */
-export function resolveEngineConfig(options = {}) {
-  const {
-    timeout = 0,
-    progressCallback,
-    onError,
-    units = "inch",
-    scale = 72,
-    spacing = 0,
-    render,
-    ...config
-  } = options;
-  const deepNestConfig = {
-    ...DEFAULT_ENGINE_CONFIG,
-    ...config,
-    units,
-    scale,
-    spacing,
-  };
-  return { deepNestConfig, timeout, progressCallback, onError };
+export const DEFAULT_ENGINE = "deepnest";
+
+registerEngine(DEFAULT_ENGINE, () => import("./engines/deepnest.mjs"));
+
+async function resolveSelectedEngine(options) {
+  const name = options.engine || process.env.DEEPNEST_ENGINE || DEFAULT_ENGINE;
+  const modulePath = process.env.DEEPNEST_ENGINE_MODULE;
+  if (!hasEngine(name) && modulePath) {
+    registerEngine(name, () =>
+      import(pathToFileURL(modulePath).href)
+    );
+  }
+  return resolveEngine(name);
+}
+
+async function run(geometry, renderContext, callback, options = {}) {
+  const nest = await resolveSelectedEngine(options);
+  return nest(geometry, renderContext, callback, options);
 }
 
 /**
- * Nest canonical geometry. Returns the abort function.
+ * Nest canonical geometry with the selected engine. Returns the abort function.
  *
  * @param {{sheets: Array, parts: Array}} geometry
  * @param {(payload: object) => any} callback
@@ -73,122 +64,12 @@ export async function nestGeometry(geometry, callback, options = {}) {
 /**
  * Internal variant used by the SVG path: `renderContext` carries adapter-owned
  * DOM/render data (kept out of canonical geometry).
+ *
+ * @param {{sheets: Array, parts: Array}} geometry
+ * @param {object|null} renderContext
+ * @param {(payload: object) => any} callback
+ * @param {object} [options]
  */
 export async function nestWithRender(geometry, renderContext, callback, options = {}) {
   return run(geometry, renderContext, callback, options);
-}
-
-async function run(geometry, renderContext, callback, options) {
-  // Engine selection. The original Deepnest engine is the default; set
-  // DEEPNEST_ENGINE=ironnest for the optional ironnest (Rust) engine.
-  const engine = (process.env.DEEPNEST_ENGINE || "deepnest").toLowerCase();
-  if (engine === "ironnest") {
-    const { nestGeometryIronnest } = await import("./engine-ironnest/index.mjs");
-    return nestGeometryIronnest(geometry, callback, options);
-  }
-
-  const normalized = normalizeGeometry(geometry);
-  const { deepNestConfig, timeout, progressCallback, onError } =
-    resolveEngineConfig(options);
-
-  const eventEmitter = new EventTarget();
-  const deepNest = new DeepNest(eventEmitter, deepNestConfig);
-
-  // Sheets first (bin occupies parts[0], preserving the historical source
-  // offset), then nestable parts.
-  const entries = [
-    ...normalized.sheets.map((sheet) => ({ ...sheet, sheet: true })),
-    ...normalized.parts.map((part) => ({ ...part, sheet: false })),
-  ];
-
-  const renderEntries = renderContext ? renderContext.entries : null;
-
-  deepNest.parts.length = 0;
-  entries.forEach((entry, index) => {
-    const part = {
-      polygontree: clonePolygonTree(entry.polygontree),
-      quantity: entry.quantity,
-      filename: entry.id,
-    };
-    if (entry.sheet) {
-      part.sheet = true;
-    }
-    if (renderEntries && renderEntries[index]) {
-      part.svgelements = renderEntries[index].svgelements;
-      part.bounds = renderEntries[index].bounds;
-    }
-    deepNest.parts.push(part);
-  });
-
-  const total = normalized.parts.reduce((sum, part) => sum + part.quantity, 0);
-
-  let timer = 0;
-  let aborted = false;
-  const worker = new Worker(new URL("../../main/background.js", import.meta.url));
-  eventEmitter.addEventListener("background-start", ({ detail }) =>
-    worker.postMessage(detail)
-  );
-  worker.on("message", ({ type, data }) =>
-    eventEmitter.dispatchEvent(new CustomEvent(type, { detail: data }))
-  );
-  // Engine/worker failures (e.g. sheet exhaustion inside placeParts) must fail
-  // the job instead of crashing the process as an unhandled worker "error".
-  // Also stop the main-thread worker timer so the process can exit.
-  worker.on("error", (error) => {
-    clearTimeout(timer);
-    deepNest.stop();
-    onError?.(error);
-  });
-  worker.on("exit", (code) => {
-    if (!aborted && code !== 0) {
-      clearTimeout(timer);
-      deepNest.stop();
-      onError?.(new Error(`nesting worker exited with code ${code}`));
-    }
-  });
-
-  eventEmitter.addEventListener("background-progress", ({ detail }) => {
-    detail.progress >= 0 && progressCallback?.(detail);
-  });
-
-  const abort = async () => {
-    if (aborted) {
-      return;
-    }
-    aborted = true;
-    clearTimeout(timer);
-    process.off("SIGINT", abort);
-    deepNest.stop();
-    await worker.terminate();
-  };
-  timer = timeout && setTimeout(abort, timeout);
-  process.on("SIGINT", abort);
-
-  eventEmitter.addEventListener("placement", ({ detail: { data, better } }) => {
-    const result = data.placements.flatMap(({ sheetplacements }) =>
-      sheetplacements.slice().sort((a, b) => a.id - b.id)
-    );
-    const unplaced = data.unplaced || [];
-    return callback({
-      result,
-      data,
-      elements: normalized.parts,
-      unplaced,
-      status: {
-        better,
-        complete: result.length === total,
-        placed: result.length,
-        total,
-        unplaced: unplaced.length,
-      },
-      svg: renderContext
-        ? () => renderContext.render(deepNest, data, `${result.length}/${total}`)
-        : undefined,
-      abort,
-    });
-  });
-
-  deepNest.start();
-
-  return abort;
 }

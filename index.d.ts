@@ -5,11 +5,6 @@ type NestingConfig = {
   curveTolerance?: number;
   /** number of evenly spaced orientations (4 → 0/90/180/270) or an angle list */
   rotations?: number | number[];
-  /** samples per item placement */
-  budget?: number;
-  strategy?: "sampling" | "nfp";
-  separationEffort?: "full" | "fast" | "max" | "off";
-  columnWeight?: number;
 };
 
 type NestingOptions = NestingConfig & {
