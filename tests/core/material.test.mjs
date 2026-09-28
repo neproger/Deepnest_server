@@ -59,7 +59,7 @@ test("material union splits nested frames into separate ring regions", async () 
   assert.ok(area(small) > area(small.children[0]));
 });
 
-test("svg-adapter exposes rigid nested frames as one part with regions", async () => {
+test("svg-adapter keeps a rigid nested object as one (safe) part", async () => {
   const raw = readFileSync(fixture, "utf8");
   const bin =
     "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"0\" y=\"0\" width=\"100000\" height=\"100000\"/></svg>";
@@ -69,10 +69,10 @@ test("svg-adapter exposes rigid nested frames as one part with regions", async (
     { units: "mm", scale: 25.4, bin, spacing: 0, curveTolerance: 1 }
   );
 
+  // Several material regions -> the engine gets one convex-hull body (never
+  // overlapping anything), not a multi-region part.
   assert.equal(geometry.parts.length, 1);
   const part = geometry.parts[0];
-  // Region 0 (primary body) is a ring; the other ring rides along as an extra region.
-  assert.equal((part.polygontree.children ?? []).length, 1);
-  assert.equal(part.regions.length, 1);
-  assert.equal((part.regions[0].children ?? []).length, 1);
+  assert.equal(part.regions, undefined);
+  assert.ok(part.polygontree.length >= 3);
 });

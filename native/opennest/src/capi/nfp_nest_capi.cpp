@@ -81,28 +81,15 @@ std::vector<int> buildInputs(
     int part_count, const int* pvc, const double* pxy, const int* pqty,
     const int* prot,
     const int* phc, const int* phvc, const double* phxy,
-    const int* prc, const int* prvc, const double* prxy,
-    const int* prhc, const int* prhvc, const double* prhxy,
     int sheet_count, const int* svc, const double* sxy,
     const int* shc, const int* shvc, const double* shxy)
 {
     std::vector<int> instancePart;
 
-    if (std::getenv("NFP_DBG_REGIONS") != nullptr) {
-        int total = 0;
-        for (int i = 0; i < part_count; i++) total += prc ? prc[i] : 0;
-        std::cerr << "[DBG_REGIONS] parts=" << part_count << " total=" << total
-                  << " prc=" << (prc ? "set" : "null") << "\n";
-    }
-
     // --- parts ---
     size_t xyCur = 0;     // cursor into pxy
     size_t holeIdx = 0;   // running hole index into phvc
     size_t holeXy = 0;    // cursor into phxy
-    size_t regionOrdinal = 0;   // running region index into prvc / prhc
-    size_t regionXy = 0;        // cursor into prxy
-    size_t regionHoleVc = 0;    // cursor into prhvc
-    size_t regionHoleXy = 0;    // cursor into prhxy
     for (int i = 0; i < part_count; i++) {
         int nv = pvc[i];
         // capture this part's outer points
@@ -126,37 +113,6 @@ std::vector<int> buildInputs(
         }
 
         int q = (pqty && pqty[i] > 0) ? pqty[i] : 1;
-
-        // Extra rigid material regions of this part (concentric rings / disjoint bodies).
-        int nRegions = prc ? prc[i] : 0;
-        std::vector<std::vector<Point>> regionOuters;
-        std::vector<std::vector<std::vector<Point>>> regionHoles;
-        regionOuters.reserve(nRegions > 0 ? nRegions : 0);
-        regionHoles.reserve(nRegions > 0 ? nRegions : 0);
-        for (int r = 0; r < nRegions; r++) {
-            int rv = prvc[regionOrdinal];
-            std::vector<Point> ro;
-            ro.reserve(rv);
-            for (int k = 0; k < rv; k++)
-                ro.push_back(Point(prxy[regionXy + 2*k], prxy[regionXy + 2*k + 1]));
-            regionXy += static_cast<size_t>(rv) * 2;
-
-            int rh = prhc ? prhc[regionOrdinal] : 0;
-            regionOrdinal++;
-            std::vector<std::vector<Point>> rHoles;
-            for (int h = 0; h < rh; h++) {
-                int hv = prhvc[regionHoleVc++];
-                std::vector<Point> hp;
-                hp.reserve(hv);
-                for (int k = 0; k < hv; k++)
-                    hp.push_back(Point(prhxy[regionHoleXy + 2*k], prhxy[regionHoleXy + 2*k + 1]));
-                regionHoleXy += static_cast<size_t>(hv) * 2;
-                rHoles.push_back(std::move(hp));
-            }
-            regionOuters.push_back(std::move(ro));
-            regionHoles.push_back(std::move(rHoles));
-        }
-
         for (int c = 0; c < q; c++) {
             auto poly = std::make_shared<NFP>();
             // Id = index in ctx.Polygons / ctx.Sheets, the SAME numbering NestingContext::init()
@@ -173,16 +129,6 @@ std::vector<int> buildInputs(
                 auto child = std::make_shared<NFP>();
                 child->Points = hp;
                 poly->children.push_back(child);
-            }
-            for (int r = 0; r < nRegions; r++) {
-                auto region = std::make_shared<NFP>();
-                region->Points = regionOuters[r];
-                for (auto& hp : regionHoles[r]) {
-                    auto child = std::make_shared<NFP>();
-                    child->Points = hp;
-                    region->children.push_back(child);
-                }
-                poly->regions.push_back(region);
             }
             ctx.Polygons.push_back(poly);
             instancePart.push_back(i);
@@ -311,7 +257,7 @@ int rectFastPath(NestingContext& ctx, const NestConfig& cfg, const NfpParams* pa
         return true;
     };
     for (const auto& p : ctx.Polygons)
-        if (!p->children.empty() || !p->regions.empty() || !isAxisRectOutline(*p)) return -1;   // part holes / multi-region => GA path
+        if (!p->children.empty() || !isAxisRectOutline(*p)) return -1;   // part holes => GA path
     for (const auto& s : ctx.Sheets) {
         if (!isAxisRectOutline(*s)) return -1;
         for (const auto& c : s->children)
@@ -411,12 +357,6 @@ NFP_API int nfp_nest(
     const int*    part_hole_counts,
     const int*    part_hole_vertex_counts,
     const double* part_hole_xy,
-    const int*    part_region_counts,
-    const int*    part_region_vertex_counts,
-    const double* part_region_xy,
-    const int*    part_region_hole_counts,
-    const int*    part_region_hole_vertex_counts,
-    const double* part_region_hole_xy,
     int           sheet_count,
     const int*    sheet_vertex_counts,
     const double* sheet_xy,
@@ -478,8 +418,6 @@ NFP_API int nfp_nest(
         ctx, part_count, part_vertex_counts, part_xy, part_quantities,
         part_rotations,
         part_hole_counts, part_hole_vertex_counts, part_hole_xy,
-        part_region_counts, part_region_vertex_counts, part_region_xy,
-        part_region_hole_counts, part_region_hole_vertex_counts, part_region_hole_xy,
         sheet_count, sheet_vertex_counts, sheet_xy,
         sheet_hole_counts, sheet_hole_vertex_counts, sheet_hole_xy);
 

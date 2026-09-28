@@ -46,19 +46,6 @@ void NestingContext::init() {
                 clone->children.push_back(childClone);
             }
         }
-        // Rigid multi-region parts: carry every extra region (outer + holes).
-        for (auto& ritem : item->regions) {
-            auto regionClone = std::make_shared<NFP>();
-            regionClone->Points = ritem->Points;
-            regionClone->exactFlags = ritem->exactFlags;
-            for (auto& citem : ritem->children) {
-                auto childClone = std::make_shared<NFP>();
-                childClone->Points = citem->Points;
-                childClone->exactFlags = citem->exactFlags;
-                regionClone->children.push_back(childClone);
-            }
-            clone->regions.push_back(regionClone);
-        }
         lpoly.push_back(clone);
     }
 
@@ -94,14 +81,9 @@ void NestingContext::init() {
 
         for (auto& [src, group] : polyGroups) {
             NestingEngine::offsetTree(*group[0], 0.5 * config.spacing, config);
-            // Rigid multi-region parts: inflate every region by the same spacing.
-            for (auto& region : group[0]->regions) {
-                NestingEngine::offsetTree(*region, 0.5 * config.spacing, config);
-            }
             // Copy offset points to all items in the group
             for (size_t i = 1; i < group.size(); i++) {
                 group[i]->Points = group[0]->Points;
-                group[i]->regions = group[0]->regions;   // shared, read-only during the solve
             }
         }
 

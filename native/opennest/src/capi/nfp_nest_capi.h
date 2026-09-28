@@ -76,16 +76,6 @@ NFP_API int nfp_nest(
     const int*    part_hole_counts,          // [part_count]
     const int*    part_hole_vertex_counts,   // [sum(part_hole_counts)]
     const double* part_hole_xy,              // [sum(part_hole_vertex_counts)*2]
-    // Rigid multi-region parts (concentric rings / disjoint bodies of one grouped object).
-    // Each part may add `part_region_counts[i]` extra regions beyond the primary outer+holes
-    // above; all regions share the part's single placement transform. All arrays may be NULL
-    // (no extra regions), which keeps single-region parts byte-identical to before.
-    const int*    part_region_counts,        // [part_count] extra regions per part
-    const int*    part_region_vertex_counts, // [sum(part_region_counts)]
-    const double* part_region_xy,            // [sum(part_region_vertex_counts)*2]
-    const int*    part_region_hole_counts,   // [sum(part_region_counts)]
-    const int*    part_region_hole_vertex_counts, // [sum(part_region_hole_counts)]
-    const double* part_region_hole_xy,       // [sum(part_region_hole_vertex_counts)*2]
     int           sheet_count,
     const int*    sheet_vertex_counts,       // [sheet_count]
     const double* sheet_xy,                  // [sum(sheet_vertex_counts)*2]

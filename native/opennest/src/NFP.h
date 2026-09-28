@@ -28,12 +28,6 @@ public:
     std::vector<bool> exactFlags;  // per-vertex "exact" flag (lazy: empty = all exact)
     std::vector<std::shared_ptr<NFP>> children;
 
-    // Rigid multi-region parts (e.g. the concentric rings of one grouped CorelDRAW
-    // object): Points/children describe region 0; `regions` holds the remaining
-    // regions, each a full NFP (outer Points + hole children). Every region shares
-    // the instance's single (x, y, Rotation) transform. Empty for ordinary parts.
-    std::vector<std::shared_ptr<NFP>> regions;
-
     // Role of a CHILD loop inside an outer-NFP result. Concave NFPs are often
     // MULTI-REGION: Clipper's Minkowski union can return several disjoint (or
     // pinch-touching) loops. The extra forbidden regions are stored as children

@@ -30,10 +30,12 @@ for its licenses.
 
 A part's **body is derived from the SVG fill**: filled = material, unfilled =
 hole, with each element's `fill-rule` (and a compound `<path>`'s even-odd)
-preserved. A rigid object — one CorelDRAW object/group — stays **one part**: its
-material may be several regions (e.g. concentric rings), which the engine nests
-with a single transform via `part.regions` (see `src/geometry/material.mjs`).
-Split the object in CorelDRAW to nest those regions independently.
+preserved. The engine understands a single outer + holes, so a rigid object —
+one CorelDRAW object/group — is sent as **one part**: if its material is a
+single filled region that region is used directly; if it is several regions
+(disjoint bodies or nested rings) the part falls back to the **convex hull** of
+that material, so nothing can overlap the body (multi-region parts are not
+modelled). Merge/weld the shapes in CorelDRAW to keep objects single-region.
 
 The original **Deepnest** engine (JavaScript + the native Minkowski NFP addon in
 `src/`) is still available and streams incremental improvements while it runs;

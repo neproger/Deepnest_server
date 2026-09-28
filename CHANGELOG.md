@@ -2,6 +2,13 @@
 (newest on top, breaking changes)
 
 
+2026-09-28 roll back the engine **multi-region parts**: the per-region Minkowski
+           path could place parts on top of each other (reproduced with a
+           synthetic "i" and with real Corel exports; the engine's own
+           NFP_VERIFY_PLACE flagged it). An SVG part body is now: one filled
+           region -> used directly; several regions (disjoint bodies / nested
+           rings) -> their **convex hull** (safe: nothing can overlap the body).
+           Proper multi-region nesting needs a path-set implementation first.
 2026-09-28 split SVG parts by **fill**: a rigid object (one CorelDRAW object/group)
            is now ONE part whose body is the union of its filled regions
            (filled = material, unfilled = hole; compound-path fill-rule/even-odd

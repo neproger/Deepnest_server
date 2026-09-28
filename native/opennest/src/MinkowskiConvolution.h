@@ -11,12 +11,6 @@ namespace nest {
 /// needs the result type. Stateless / reentrant: safe to call from worker threads.
 class MinkowskiConvolution {
 public:
-    // One material region: an outer ring plus its own holes.
-    struct Region {
-        std::vector<double> outer;                    // x0,y0,x1,y1,... (real coords)
-        std::vector<std::vector<double>> holes;        // each: x0,y0,...
-    };
-
     struct Result {
         std::vector<std::vector<double>> outerPaths;  // each: x0,y0,x1,y1,... (real coords)
         std::vector<std::vector<double>> holes;       // each: x0,y0,x1,y1,... (real coords)
@@ -26,14 +20,13 @@ public:
     /// int64 ops. The convolution itself uses an internal dynamic scale (see .cpp).
     static constexpr double kScale = 10000000.0;
 
-    /// NFP of polygon set A against polygon set B, i.e. Minkowski sum A ⊕ (−B),
-    /// referenced to B region 0's first vertex. A and B may each hold several regions
-    /// (a rigid part's separate / nested bodies). The convolution is computed per
-    /// (A-region, B-region) pair and unioned, which preserves nested forbidden zones
-    /// (a solid ring inside another ring's hole) that a single polygon_set merges away.
+    /// NFP of polygon A (outer ring Apts + holes Aholes) against polygon B (Bpts),
+    /// i.e. the Minkowski sum A ⊕ (−B), referenced to B's first vertex. All point
+    /// arrays are flat interleaved x,y in real (unscaled) coordinates.
     static Result compute(
-        const std::vector<Region>& A,
-        const std::vector<Region>& B);
+        const std::vector<double>& Apts,
+        const std::vector<std::vector<double>>& Aholes,
+        const std::vector<double>& Bpts);
 };
 
 } // namespace nest

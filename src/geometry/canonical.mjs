@@ -97,23 +97,7 @@ function normalizeEntry(entry, where) {
   assertId(entry.id, where);
   validatePolygonTree(entry.polygontree, `${where}.polygontree`);
   const quantity = assertQuantity(entry.quantity, where);
-  const normalized = { id: entry.id, quantity, polygontree: entry.polygontree };
-
-  // Rigid multi-region parts (e.g. concentric rings of one grouped CorelDRAW object):
-  // extra material regions that share the part's single placement transform.
-  if (entry.regions !== undefined) {
-    if (!Array.isArray(entry.regions)) {
-      fail(`${where}.regions must be an array`);
-    }
-    entry.regions.forEach((region, i) =>
-      validatePolygonTree(region, `${where}.regions[${i}]`)
-    );
-    if (entry.regions.length > 0) {
-      normalized.regions = entry.regions;
-    }
-  }
-
-  return normalized;
+  return { id: entry.id, quantity, polygontree: entry.polygontree };
 }
 
 /**

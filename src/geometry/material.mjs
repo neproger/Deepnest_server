@@ -137,6 +137,11 @@ export function buildMaterialRegions(elements, polygonify) {
   const toPoints = (path) =>
     path.map((p) => ({ x: p.X / SCALE, y: p.Y / SCALE }));
 
+  // Region 0 must be the LARGEST body: the engine uses the primary outer for the
+  // sheet inner-fit and as the placement reference. Clipper's output order is not
+  // guaranteed, so sort by descending area.
+  outers.sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
+
   for (const hole of holes) {
     // Attach the hole to the smallest outer that contains it.
     let best = null;

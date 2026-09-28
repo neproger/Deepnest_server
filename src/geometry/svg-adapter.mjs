@@ -86,9 +86,12 @@ export async function parseSvgInput(svgInput, options = {}) {
 
   partGroups.forEach(({ id, imported, rigid }) => {
     // Rigid (one CorelDRAW object/group) => one part whose body is the union of its
-    // filled regions. Filled = material, unfilled = holes; nested art (concentric
-    // rings) becomes multiple regions of ONE rigid part instead of a convex hull that
-    // filled the gaps. Non-rigid input keeps the per-root behaviour.
+    // filled regions (filled = material, unfilled = hole). The engine understands a
+    // single outer + holes, so:
+    //   - one material region  -> use it directly (the common case, e.g. a letter/ring);
+    //   - several regions      -> fall back to their convex hull (safe: nothing can
+    //     overlap the body; multi-region parts are not modelled by the engine).
+    // Non-rigid input keeps the per-root behaviour.
     const elements = imported.flatMap((part) => part.svgelements ?? []);
     const material =
       rigid && elements.length > 0
@@ -96,10 +99,10 @@ export async function parseSvgInput(svgInput, options = {}) {
         : [];
 
     let polygontree;
-    let regions;
-    if (material.length > 0) {
+    if (material.length === 1) {
       polygontree = clonePolygonTree(material[0]);
-      regions = material.slice(1).map((region) => clonePolygonTree(region));
+    } else if (material.length > 1) {
+      polygontree = convexHullTree(material);
     } else {
       polygontree =
         imported.length === 1
@@ -107,11 +110,7 @@ export async function parseSvgInput(svgInput, options = {}) {
           : convexHullTree(imported.map((part) => part.polygontree));
     }
 
-    const part = { id, quantity: 1, polygontree };
-    if (regions && regions.length > 0) {
-      part.regions = regions;
-    }
-    parts.push(part);
+    parts.push({ id, quantity: 1, polygontree });
 
     entries.push({
       svgelements: imported.flatMap((part) => part.svgelements),

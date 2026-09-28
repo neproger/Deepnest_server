@@ -8,10 +8,11 @@
 > runtime probe (see "Runtime evidence" below).
 >
 > **Update (2026-09-28):** a part body is now derived from the SVG **fill**
-> (`src/geometry/material.mjs`, `src/geometry/svg-adapter.mjs`): rigid input
-> (one CorelDRAW object/group) becomes ONE part with `part.regions` (its material
-> may be several nested regions, e.g. concentric rings). The containment
-> `toTree()` described below is still used for non-rigid input.
+> (`src/geometry/material.mjs`, `src/geometry/svg-adapter.mjs`). A rigid object
+> (one CorelDRAW object/group) becomes ONE part: a single filled region is used
+> directly, several regions fall back to their convex hull (the engine models a
+> single outer + holes, not multi-region bodies). The containment `toTree()`
+> described below is no longer the collision model for rigid input.
 
 ## Current Flow
 

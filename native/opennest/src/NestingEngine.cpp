@@ -193,12 +193,6 @@ NFP NestingEngine::cloneTree(const NFP& tree) {
             newtree.children.push_back(std::make_shared<NFP>(cloneTree(*c)));
         }
     }
-    // Rigid multi-region parts: carry the extra regions with the geometry.
-    if (!tree.regions.empty()) {
-        for (auto& region : tree.regions) {
-            newtree.regions.push_back(std::make_shared<NFP>(cloneTree(*region)));
-        }
-    }
     return newtree;
 }
 
